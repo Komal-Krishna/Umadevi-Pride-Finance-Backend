@@ -9,18 +9,12 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Create FastAPI app
-app = FastAPI(
-    title=settings.app_name,
-    description="Finance Management System for Uma Devi's Pride",
-    version="1.0.0",
-    debug=settings.debug
-)
+app = FastAPI(title="Uma Devi's Pride Finance API", version="1.0.0")
 
-# Add CORS middleware
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, restrict this to your frontend domain
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -36,21 +30,14 @@ app.include_router(dashboard.router, prefix="/api/v1")
 
 @app.get("/")
 async def root():
-    """Root endpoint"""
-    return {
-        "message": "Welcome to Uma Devi's Pride Finance Management System",
-        "version": "1.0.0",
-        "status": "running"
-    }
+    return {"message": "Uma Devi's Pride Finance API"}
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
-    return {"status": "healthy", "timestamp": "2024-01-01T00:00:00Z"}
+    return {"status": "healthy"}
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
-    """Global exception handler"""
     logger.error(f"Global exception: {exc}")
     return JSONResponse(
         status_code=500,

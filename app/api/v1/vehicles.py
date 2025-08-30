@@ -88,9 +88,8 @@ async def create_vehicle(
         if not created_vehicle:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Error creating vehicle"
+                detail="Error creating vehicle record"
             )
-        
         return created_vehicle
     except HTTPException:
         raise
@@ -98,7 +97,7 @@ async def create_vehicle(
         logger.error(f"Error creating vehicle: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error creating vehicle"
+            detail=f"Error creating vehicle record: {str(e)}"
         )
 
 @router.put("/{vehicle_id}", response_model=VehicleResponse)
@@ -153,17 +152,43 @@ async def close_vehicle(
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Error closing vehicle"
+                detail="Error closing vehicle record"
             )
         
-        return {"message": "Vehicle closed successfully"}
+        return {"message": "Vehicle record closed successfully"}
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error closing vehicle: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error closing vehicle"
+            detail="Error closing vehicle record"
+        )
+
+@router.delete("/{vehicle_id}")
+async def delete_vehicle(
+    vehicle_id: int,
+    current_user: dict = Depends(get_current_user),
+    db: DatabaseManager = Depends(get_database)
+):
+    """Soft delete a vehicle record"""
+    try:
+        success = await db.soft_delete_vehicle(vehicle_id)
+        
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Error deleting vehicle record"
+            )
+        
+        return {"message": "Vehicle record deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting vehicle: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error deleting vehicle record"
         )
 
 @router.post("/{vehicle_id}/payments", response_model=PaymentResponse)
