@@ -8,8 +8,8 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE TABLE IF NOT EXISTS vehicles (
     id SERIAL PRIMARY KEY,
     vehicle_name VARCHAR(100) NOT NULL,
-    principle_amount DECIMAL(10,2) NOT NULL CHECK (principle_amount > 0),
-    rent DECIMAL(10,2) NOT NULL CHECK (rent > 0),
+    principle_amount NUMERIC(15,2) NOT NULL CHECK (principle_amount > 0),
+    rent NUMERIC(15,2) NOT NULL CHECK (rent > 0),
     payment_frequency VARCHAR(20) NOT NULL DEFAULT 'monthly' CHECK (payment_frequency IN ('monthly', 'bimonthly', 'quarterly')),
     date_of_lending DATE NOT NULL,
     lend_to VARCHAR(100) NOT NULL,

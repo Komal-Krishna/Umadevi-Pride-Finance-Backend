@@ -43,6 +43,7 @@ class DatabaseManager:
             # Serialize data if present
             if data:
                 data = self._serialize_data(data)
+                logger.info(f"Serialized data being sent: {data}")
             
             if method.upper() == "GET":
                 response = await self.client.get(url)
@@ -55,7 +56,13 @@ class DatabaseManager:
             else:
                 raise ValueError(f"Unsupported HTTP method: {method}")
             
-            response.raise_for_status()
+            logger.info(f"Supabase response status: {response.status_code}")
+            logger.info(f"Supabase response headers: {response.headers}")
+            
+            if response.status_code >= 400:
+                logger.error(f"Supabase error response: {response.text}")
+                response.raise_for_status()
+            
             return response.json() if response.content else {}
             
         except Exception as e:
@@ -83,35 +90,34 @@ class DatabaseManager:
             # Remove any None values that might cause issues
             clean_data = {k: v for k, v in vehicle_data.items() if v is not None}
             
+            # Log the data being sent to Supabase
+            logger.info(f"Creating vehicle with data: {clean_data}")
+            logger.info(f"Data types: {[(k, type(v)) for k, v in clean_data.items()]}")
+            
             result = await self._make_request("POST", "vehicles", clean_data)
             
             # Supabase returns the created record in the response
             if isinstance(result, list) and len(result) > 0:
-                return result[0]
-            elif isinstance(result, dict):
+                created_vehicle = result[0]
+                # Ensure we have the ID from the response
+                if "id" in created_vehicle:
+                    return created_vehicle
+            elif isinstance(result, dict) and "id" in result:
                 return result
-            else:
-                # If no data returned, try to fetch the created vehicle
-                vehicles = await self.get_vehicles()
-                if vehicles:
-                    # Find the most recent vehicle with matching details
-                    for vehicle in reversed(vehicles):
-                        if (vehicle.get('vehicle_name') == clean_data.get('vehicle_name') and
-                            vehicle.get('lend_to') == clean_data.get('lend_to')):
-                            return vehicle
-                
-                # Return a success response even if we can't get the data
-                return {
-                    "id": None,
-                    "vehicle_name": clean_data.get('vehicle_name'),
-                    "principle_amount": clean_data.get('principle_amount'),
-                    "rent": clean_data.get('rent'),
-                    "payment_frequency": clean_data.get('payment_frequency'),
-                    "date_of_lending": clean_data.get('date_of_lending'),
-                    "lend_to": clean_data.get('lend_to'),
-                    "is_closed": clean_data.get('is_closed', False),
-                    "message": "Vehicle created successfully"
-                }
+            
+            # If we don't get a proper response with ID, try to fetch the created vehicle
+            logger.info("No proper response from Supabase, fetching created vehicle...")
+            vehicles = await self.get_vehicles()
+            if vehicles:
+                # Find the most recent vehicle with matching details
+                for vehicle in reversed(vehicles):
+                    if (vehicle.get('vehicle_name') == clean_data.get('vehicle_name') and
+                        vehicle.get('lend_to') == clean_data.get('lend_to') and
+                        vehicle.get('principle_amount') == clean_data.get('principle_amount')):
+                        return vehicle
+            
+            # If we still can't find it, raise an error
+            raise Exception("Failed to create vehicle or retrieve created vehicle data")
                 
         except Exception as e:
             logger.error(f"Error creating vehicle: {e}")
@@ -189,6 +195,16 @@ class DatabaseManager:
             return result if isinstance(result, list) else []
         except Exception as e:
             logger.error(f"Error fetching payments: {e}")
+            return []
+    
+    async def get_all_payments_for_vehicles(self) -> List[Dict[str, Any]]:
+        """Get all payments for vehicles in one batch request"""
+        try:
+            endpoint = "payments?source_type=eq.vehicle"
+            result = await self._make_request("GET", endpoint)
+            return result if isinstance(result, list) else []
+        except Exception as e:
+            logger.error(f"Error fetching all vehicle payments: {e}")
             return []
     
     async def create_payment(self, payment_data: Dict[str, Any]) -> Dict[str, Any]:
