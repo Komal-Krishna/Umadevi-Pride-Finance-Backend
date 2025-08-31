@@ -11,11 +11,6 @@ sys.path.insert(0, str(project_root))
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-# Import our modules
-from app.api.v1 import vehicles, auth, dashboard, loans, outside_interest, payments, analytics
-from app.core.auth import AuthManager
-from app.config import settings
-
 # Create FastAPI app
 app = FastAPI(
     title="Uma Devi's Pride Finance Management System",
@@ -32,14 +27,55 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routers
-app.include_router(auth.router, prefix="/api/v1", tags=["Authentication"])
-app.include_router(vehicles.router, prefix="/api/v1", tags=["Vehicles"])
-app.include_router(dashboard.router, prefix="/api/v1", tags=["Dashboard"])
-app.include_router(loans.router, prefix="/api/v1", tags=["Loans"])
-app.include_router(outside_interest.router, prefix="/api/v1", tags=["Outside Interest"])
-app.include_router(payments.router, prefix="/api/v1", tags=["Payments"])
-app.include_router(analytics.router, prefix="/api/v1", tags=["Analytics"])
+# Try to import and include routers - handle missing modules gracefully
+try:
+    from app.api.v1 import vehicles
+    app.include_router(vehicles.router, prefix="/api/v1", tags=["Vehicles"])
+    print("Vehicles router loaded successfully")
+except ImportError as e:
+    print(f"Could not load vehicles router: {e}")
+
+try:
+    from app.api.v1 import auth
+    app.include_router(auth.router, prefix="/api/v1", tags=["Authentication"])
+    print("Auth router loaded successfully")
+except ImportError as e:
+    print(f"Could not load auth router: {e}")
+
+try:
+    from app.api.v1 import dashboard
+    app.include_router(dashboard.router, prefix="/api/v1", tags=["Dashboard"])
+    print("Dashboard router loaded successfully")
+except ImportError as e:
+    print(f"Could not load dashboard router: {e}")
+
+try:
+    from app.api.v1 import loans
+    app.include_router(loans.router, prefix="/api/v1", tags=["Loans"])
+    print("Loans router loaded successfully")
+except ImportError as e:
+    print(f"Could not load loans router: {e}")
+
+try:
+    from app.api.v1 import outside_interest
+    app.include_router(outside_interest.router, prefix="/api/v1", tags=["Outside Interest"])
+    print("Outside Interest router loaded successfully")
+except ImportError as e:
+    print(f"Could not load outside interest router: {e}")
+
+try:
+    from app.api.v1 import payments
+    app.include_router(payments.router, prefix="/api/v1", tags=["Payments"])
+    print("Payments router loaded successfully")
+except ImportError as e:
+    print(f"Could not load payments router: {e}")
+
+try:
+    from app.api.v1 import analytics
+    app.include_router(analytics.router, prefix="/api/v1", tags=["Analytics"])
+    print("Analytics router loaded successfully")
+except ImportError as e:
+    print(f"Could not load analytics router: {e}")
 
 @app.get("/")
 async def root():
@@ -48,6 +84,17 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
+@app.get("/debug")
+async def debug_info():
+    """Debug endpoint to see what's working"""
+    return {
+        "message": "Debug info",
+        "python_path": sys.path,
+        "current_dir": str(current_dir),
+        "project_root": str(project_root),
+        "available_modules": [m for m in sys.modules.keys() if m.startswith('app')]
+    }
 
 # Export for Vercel
 handler = app
