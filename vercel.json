@@ -11,5 +11,11 @@
       "src": "/(.*)",
       "dest": "/main.py"
     }
-  ]
+  ],
+  "git": {
+    "deploymentEnabled": {
+      "prod": true,
+      "*": false
+    }
+  }
 }
