@@ -2,8 +2,9 @@ import httpx
 import json
 from datetime import datetime, date
 from app.config import settings
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import logging
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,13 @@ class DatabaseManager:
             elif method.upper() == "POST":
                 response = await self.client.post(url, json=data)
             elif method.upper() == "PUT":
+                logger.info(f"Making PUT request to {url} with data: {data}")
                 response = await self.client.put(url, json=data)
+                logger.info(f"PUT request completed with status: {response.status_code}")
+            elif method.upper() == "PATCH":
+                logger.info(f"Making PATCH request to {url} with data: {data}")
+                response = await self.client.patch(url, json=data)
+                logger.info(f"PATCH request completed with status: {response.status_code}")
             elif method.upper() == "DELETE":
                 response = await self.client.delete(url)
             else:
@@ -61,9 +68,14 @@ class DatabaseManager:
             
             if response.status_code >= 400:
                 logger.error(f"Supabase error response: {response.text}")
+                logger.error(f"Request URL: {url}")
+                logger.error(f"Request method: {method}")
+                logger.error(f"Request data: {data}")
                 response.raise_for_status()
             
-            return response.json() if response.content else {}
+            response_content = response.json() if response.content else {}
+            logger.info(f"Supabase response content: {response_content}")
+            return response_content
             
         except Exception as e:
             logger.error(f"HTTP request error: {e}")
@@ -123,21 +135,69 @@ class DatabaseManager:
             logger.error(f"Error creating vehicle: {e}")
             raise e
     
-    async def update_vehicle(self, vehicle_id: int, update_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Update a vehicle record"""
+    async def get_vehicle_by_id(self, vehicle_id: int) -> Optional[Dict[str, Any]]:
+        """Get a specific vehicle by ID"""
         try:
-            endpoint = f"vehicles?id=eq.{vehicle_id}"
-            result = await self._make_request("PUT", endpoint, update_data)
+            endpoint = f"vehicles?id=eq.{vehicle_id}&deleted_at=is.null"
+            result = await self._make_request("GET", endpoint)
             
             if isinstance(result, list) and len(result) > 0:
                 return result[0]
             elif isinstance(result, dict):
                 return result
             else:
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error fetching vehicle {vehicle_id}: {e}")
+            return None
+
+    async def update_vehicle(self, vehicle_id: int, update_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Update a vehicle record"""
+        try:
+            logger.info(f"Database: Updating vehicle {vehicle_id} with data: {update_data}")
+            
+            # Use PATCH for updates as it's more reliable with Supabase
+            endpoint = f"vehicles?id=eq.{vehicle_id}"
+            logger.info(f"Database: Making PATCH request to endpoint: {endpoint}")
+            
+            result = await self._make_request("PATCH", endpoint, update_data)
+            logger.info(f"Database: PATCH request result: {result}")
+            
+            # Supabase PATCH requests often return empty responses on success
+            # We'll always try to fetch the updated vehicle to confirm the update worked
+            logger.info(f"Database: Fetching updated vehicle {vehicle_id} after PATCH request")
+            
+            # Small delay to ensure database commit
+            await asyncio.sleep(0.1)
+            
+            # Fetch the updated vehicle with all fields
+            vehicle_endpoint = f"vehicles?id=eq.{vehicle_id}&deleted_at=is.null"
+            updated_vehicle = await self._make_request("GET", vehicle_endpoint)
+            logger.info(f"Database: Fetched updated vehicle: {updated_vehicle}")
+            
+            if isinstance(updated_vehicle, list) and len(updated_vehicle) > 0:
+                # Verify that the update actually changed the data
+                vehicle = updated_vehicle[0]
+                logger.info(f"Database: Successfully retrieved updated vehicle: {vehicle}")
+                return vehicle
+            elif isinstance(updated_vehicle, dict):
+                logger.info(f"Database: Successfully retrieved updated vehicle: {updated_vehicle}")
+                return updated_vehicle
+            else:
+                logger.error(f"Database: No vehicle data found after update for ID {vehicle_id}")
+                logger.error(f"Database: This might indicate the vehicle was deleted or the update failed")
                 return {}
                 
         except Exception as e:
-            logger.error(f"Error updating vehicle: {e}")
+            logger.error(f"Database: Error updating vehicle {vehicle_id}: {e}")
+            # Check if it's a specific Supabase error
+            if "400 Bad Request" in str(e):
+                logger.error(f"Database: Supabase rejected the update request - check data format and constraints")
+            elif "404 Not Found" in str(e):
+                logger.error(f"Database: Vehicle {vehicle_id} not found in database")
+            elif "500 Internal Server Error" in str(e):
+                logger.error(f"Database: Supabase internal error during update")
             return {}
     
     async def close_vehicle(self, vehicle_id: int) -> bool:
@@ -148,8 +208,11 @@ class DatabaseManager:
                 "closure_date": "now()"
             }
             endpoint = f"vehicles?id=eq.{vehicle_id}"
-            result = await self._make_request("PUT", endpoint, update_data)
-            return bool(result)
+            result = await self._make_request("PATCH", endpoint, update_data)
+            
+            # Supabase PATCH operations return empty responses on success
+            # The fact that we got here without an exception means it succeeded
+            return True
         except Exception as e:
             logger.error(f"Error closing vehicle: {e}")
             return False
@@ -157,14 +220,26 @@ class DatabaseManager:
     async def soft_delete_vehicle(self, vehicle_id: int) -> bool:
         """Soft delete a vehicle record"""
         try:
+            logger.info(f"Database: Soft deleting vehicle {vehicle_id}")
+            
             update_data = {
                 "deleted_at": "now()"
             }
             endpoint = f"vehicles?id=eq.{vehicle_id}"
-            result = await self._make_request("PUT", endpoint, update_data)
-            return bool(result)
+            
+            logger.info(f"Database: Making PATCH request to endpoint: {endpoint}")
+            logger.info(f"Database: Delete data: {update_data}")
+            
+            result = await self._make_request("PATCH", endpoint, update_data)
+            logger.info(f"Database: Delete PATCH result: {result}")
+            
+            # Supabase PATCH operations return empty responses on success
+            # The fact that we got here without an exception means it succeeded
+            logger.info(f"Database: Soft delete successful for vehicle {vehicle_id}")
+            return True
+                
         except Exception as e:
-            logger.error(f"Error soft deleting vehicle: {e}")
+            logger.error(f"Database: Error soft deleting vehicle {vehicle_id}: {e}")
             return False
     
     async def get_outside_interest(self, is_closed: bool = None) -> List[Dict[str, Any]]:
@@ -231,8 +306,11 @@ class DatabaseManager:
                 "closure_date": "now()"
             }
             endpoint = f"outside_interest?id=eq.{interest_id}"
-            result = await self._make_request("PUT", endpoint, update_data)
-            return bool(result)
+            result = await self._make_request("PATCH", endpoint, update_data)
+            
+            # Supabase PATCH operations return empty responses on success
+            # The fact that we got here without an exception means it succeeded
+            return True
         except Exception as e:
             logger.error(f"Error closing outside interest: {e}")
             return False

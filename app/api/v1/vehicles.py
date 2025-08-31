@@ -77,13 +77,44 @@ async def update_vehicle_details(
 ):
     """Update vehicle details"""
     try:
-        update_data = {k: v for k, v in vehicle_update.dict().items() if v is not None}
+        # First check if the vehicle exists
+        existing_vehicle = await db.get_vehicle_by_id(vehicle_id)
+        
+        if not existing_vehicle:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Vehicle with ID {vehicle_id} not found"
+            )
+        
+        # Filter out None values and format data properly
+        update_data = {}
+        for key, value in vehicle_update.dict().items():
+            if value is not None:
+                if key == "date_of_lending" and hasattr(value, 'isoformat'):
+                    update_data[key] = value.isoformat()
+                else:
+                    update_data[key] = value
+        
+        # Don't send updated_at, created_at, is_closed - let database handle these
+        # Don't send any None values
+        
+        if not update_data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No valid data provided for update"
+            )
+        
+        logger.info(f"Updating vehicle {vehicle_id} with data: {update_data}")
+        
         updated_vehicle = await db.update_vehicle(vehicle_id, update_data)
         
+        logger.info(f"Update result: {updated_vehicle}")
+        
         if not updated_vehicle:
+            logger.error(f"Update failed for vehicle {vehicle_id} - no data returned")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Error updating vehicle"
+                detail="Database update failed - no vehicle data returned"
             )
         return updated_vehicle
     except HTTPException:
@@ -92,7 +123,7 @@ async def update_vehicle_details(
         logger.error(f"Error updating vehicle: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error updating vehicle"
+            detail=f"Error updating vehicle: {str(e)}"
         )
 
 @router.delete("/delete/{vehicle_id}")
@@ -103,21 +134,36 @@ async def delete_vehicle(
 ):
     """Delete a vehicle"""
     try:
+        # First check if the vehicle exists
+        existing_vehicle = await db.get_vehicle_by_id(vehicle_id)
+        
+        if not existing_vehicle:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Vehicle with ID {vehicle_id} not found"
+            )
+        
+        logger.info(f"Attempting to delete vehicle {vehicle_id}")
+        
         success = await db.soft_delete_vehicle(vehicle_id)
         
         if not success:
+            logger.error(f"Delete operation failed for vehicle {vehicle_id}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Error deleting vehicle"
+                detail="Database delete operation failed"
             )
+        
+        logger.info(f"Successfully deleted vehicle {vehicle_id}")
         return {"message": "Vehicle deleted successfully"}
+        
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error deleting vehicle: {e}")
+        logger.error(f"Error deleting vehicle {vehicle_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error deleting vehicle"
+            detail=f"Error deleting vehicle: {str(e)}"
         )
 
 @router.post("/close/{vehicle_id}")
