@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, status, Depends
 from typing import List, Optional
-from app.models.base import PaymentCreate, PaymentUpdate, PaymentResponse
+from app.models.base import PaymentCreate, PaymentUpdate, PaymentResponse, VehiclePaymentCreate
 from app.api.dependencies import get_current_user, get_database
 from app.database.connection import DatabaseManager
 from datetime import datetime
@@ -12,6 +12,7 @@ router = APIRouter(prefix="/payments", tags=["Payments"])
 
 @router.get("/", response_model=List[PaymentResponse])
 async def get_payments(
+    vehicle_id: Optional[int] = None,
     source_type: Optional[str] = None,
     source_id: Optional[int] = None,
     current_user: dict = Depends(get_current_user),
@@ -19,7 +20,11 @@ async def get_payments(
 ):
     """Get all payments with optional filters"""
     try:
-        payments = await db.get_payments(source_type, source_id)
+        # If vehicle_id is provided, use it as source_id with source_type as 'vehicle'
+        if vehicle_id:
+            payments = await db.get_payments("vehicle", vehicle_id)
+        else:
+            payments = await db.get_payments(source_type, source_id)
         return payments
     except Exception as e:
         logger.error(f"Error fetching payments: {e}")
@@ -56,15 +61,24 @@ async def get_payment(
         )
 
 @router.post("/", response_model=PaymentResponse)
+@router.post("/create", response_model=PaymentResponse)
 async def create_payment(
-    payment: PaymentCreate,
+    payment: VehiclePaymentCreate,
     current_user: dict = Depends(get_current_user),
     db: DatabaseManager = Depends(get_database)
 ):
     """Create a new payment record"""
     try:
-        payment_data = payment.dict()
-        payment_data["created_at"] = datetime.utcnow()
+        # Convert VehiclePaymentCreate to the format expected by the database
+        payment_data = {
+            "source_type": "vehicle",
+            "source_id": payment.vehicle_id,
+            "amount": payment.amount,
+            "payment_date": payment.payment_date.isoformat() if hasattr(payment.payment_date, 'isoformat') else str(payment.payment_date),
+            "payment_type": "credit",  # All vehicle payments are credits (money received)
+            "description": payment.notes or "",  # Handle None values
+            "payment_status": "PAID"
+        }
         
         created_payment = await db.create_payment(payment_data)
         
