@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.config import settings
 from app.api.v1 import auth, vehicles, outside_interest, payments, dashboard, loans
+from app.database.connection import get_db
 import logging
 
 # Configure logging
@@ -19,6 +20,23 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize database connection on startup"""
+    logger.info("Starting up Uma Devi's Pride Finance API")
+    # Initialize database connection
+    db = get_db()
+    logger.info("Database connection initialized")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Clean up database connection on shutdown"""
+    logger.info("Shutting down Uma Devi's Pride Finance API")
+    # Clean up database connection
+    db = get_db()
+    await db.close()
+    logger.info("Database connection closed")
 
 # Include routers
 app.include_router(auth.router, prefix="/api/v1")
