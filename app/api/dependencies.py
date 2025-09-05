@@ -44,4 +44,9 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
 
 async def get_database():
     """Dependency to get database connection"""
-    return get_db()
+    db = get_db()
+    try:
+        yield db
+    finally:
+        # Clean up the database connection
+        await db.close()

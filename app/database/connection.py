@@ -13,16 +13,27 @@ class DatabaseManager:
         self.supabase_url = settings.supabase_url
         self.supabase_key = settings.supabase_key
         self.service_key = settings.supabase_service_key
-        
-        # Create HTTP client
-        self.client = httpx.AsyncClient(
-            headers={
-                "apikey": self.service_key,
-                "Authorization": f"Bearer {self.service_key}",
-                "Content-Type": "application/json"
-            },
-            timeout=30.0
-        )
+        self._client = None
+    
+    @property
+    def client(self):
+        """Get or create HTTP client with proper async handling"""
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                headers={
+                    "apikey": self.service_key,
+                    "Authorization": f"Bearer {self.service_key}",
+                    "Content-Type": "application/json"
+                },
+                timeout=30.0
+            )
+        return self._client
+    
+    async def close(self):
+        """Close the HTTP client"""
+        if self._client and not self._client.is_closed:
+            await self._client.aclose()
+            self._client = None
     
     def _serialize_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Convert datetime objects to ISO format strings for JSON serialization"""
