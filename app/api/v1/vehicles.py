@@ -21,7 +21,22 @@ async def get_all_vehicles(
 ):
     """Get all vehicles with payment calculations"""
     try:
+        logger.info(f"Fetching vehicles with is_closed filter: {is_closed}")
+        
+        # Perform health check first
+        if not await db.health_check():
+            logger.error("Database health check failed")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Database connection unavailable"
+            )
+        
         vehicles = await db.get_vehicles(is_closed)
+        logger.info(f"Retrieved {len(vehicles)} vehicles from database")
+        
+        if not vehicles:
+            logger.warning("No vehicles found in database")
+            return []
         
         # Calculate payment totals for each vehicle
         enhanced_vehicles = []
@@ -46,9 +61,14 @@ async def get_all_vehicles(
                 vehicle["is_active"] = not vehicle.get("is_closed", False)
                 enhanced_vehicles.append(vehicle)
         
+        logger.info(f"Returning {len(enhanced_vehicles)} enhanced vehicles")
         return enhanced_vehicles
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
     except Exception as e:
-        logger.error(f"Error fetching vehicles: {e}")
+        logger.error(f"Unexpected error fetching vehicles: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error fetching vehicles"
