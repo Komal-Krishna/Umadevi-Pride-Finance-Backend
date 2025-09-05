@@ -33,9 +33,9 @@ async def startup_event():
 async def shutdown_event():
     """Clean up database connection on shutdown"""
     logger.info("Shutting down Uma Devi's Pride Finance API")
-    # Clean up database connection
-    db = get_db()
-    await db.close()
+    # Clean up database connection using the proper close function
+    from app.database.connection import close_db
+    await close_db()
     logger.info("Database connection closed")
 
 # Include routers
