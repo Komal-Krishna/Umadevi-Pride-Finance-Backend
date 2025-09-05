@@ -54,24 +54,6 @@ async def root():
 async def health_check():
     return {"status": "healthy"}
 
-@app.get("/health/db")
-async def database_health_check():
-    """Check database connection health"""
-    try:
-        db = get_db()
-        is_healthy = await db.health_check()
-        return {
-            "status": "healthy" if is_healthy else "unhealthy",
-            "database": "connected" if is_healthy else "disconnected"
-        }
-    except Exception as e:
-        logger.error(f"Database health check failed: {e}")
-        return {
-            "status": "unhealthy",
-            "database": "error",
-            "error": str(e)
-        }
-
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
     logger.error(f"Global exception: {exc}")
