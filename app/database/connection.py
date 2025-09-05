@@ -55,37 +55,25 @@ class DatabaseManager:
             # Serialize data if present
             if data:
                 data = self._serialize_data(data)
-                logger.info(f"Serialized data being sent: {data}")
             
             if method.upper() == "GET":
                 response = await self.client.get(url)
             elif method.upper() == "POST":
                 response = await self.client.post(url, json=data)
             elif method.upper() == "PUT":
-                logger.info(f"Making PUT request to {url} with data: {data}")
                 response = await self.client.put(url, json=data)
-                logger.info(f"PUT request completed with status: {response.status_code}")
             elif method.upper() == "PATCH":
-                logger.info(f"Making PATCH request to {url} with data: {data}")
                 response = await self.client.patch(url, json=data)
-                logger.info(f"PATCH request completed with status: {response.status_code}")
             elif method.upper() == "DELETE":
                 response = await self.client.delete(url)
             else:
                 raise ValueError(f"Unsupported HTTP method: {method}")
             
-            logger.info(f"Supabase response status: {response.status_code}")
-            logger.info(f"Supabase response headers: {response.headers}")
-            
             if response.status_code >= 400:
                 logger.error(f"Supabase error response: {response.text}")
-                logger.error(f"Request URL: {url}")
-                logger.error(f"Request method: {method}")
-                logger.error(f"Request data: {data}")
                 response.raise_for_status()
             
             response_content = response.json() if response.content else {}
-            logger.info(f"Supabase response content: {response_content}")
             return response_content
             
         except Exception as e:
@@ -113,9 +101,6 @@ class DatabaseManager:
             # Remove any None values that might cause issues
             clean_data = {k: v for k, v in vehicle_data.items() if v is not None}
             
-            # Log the data being sent to Supabase
-            logger.info(f"Creating vehicle with data: {clean_data}")
-            logger.info(f"Data types: {[(k, type(v)) for k, v in clean_data.items()]}")
             
             result = await self._make_request("POST", "vehicles", clean_data)
             
@@ -129,7 +114,6 @@ class DatabaseManager:
                 return result
             
             # If we don't get a proper response with ID, try to fetch the created vehicle
-            logger.info("No proper response from Supabase, fetching created vehicle...")
             vehicles = await self.get_vehicles()
             if vehicles:
                 # Find the most recent vehicle with matching details
@@ -150,14 +134,26 @@ class DatabaseManager:
         """Get a specific vehicle by ID"""
         try:
             endpoint = f"vehicles?id=eq.{vehicle_id}&deleted_at=is.null"
-            result = await self._make_request("GET", endpoint)
             
-            if isinstance(result, list) and len(result) > 0:
-                return result[0]
-            elif isinstance(result, dict):
-                return result
-            else:
-                return None
+            # Retry logic for robustness
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    result = await self._make_request("GET", endpoint)
+                    
+                    if isinstance(result, list) and len(result) > 0:
+                        return result[0]
+                    elif isinstance(result, dict):
+                        return result
+                    else:
+                        return None
+                        
+                except Exception as retry_error:
+                    if attempt == max_retries - 1:
+                        raise retry_error
+                    # Wait a bit before retrying
+                    import asyncio
+                    await asyncio.sleep(0.1)
                 
         except Exception as e:
             logger.error(f"Error fetching vehicle {vehicle_id}: {e}")
@@ -166,18 +162,13 @@ class DatabaseManager:
     async def update_vehicle(self, vehicle_id: int, update_data: Dict[str, Any]) -> Dict[str, Any]:
         """Update a vehicle record"""
         try:
-            logger.info(f"Database: Updating vehicle {vehicle_id} with data: {update_data}")
-            
             # Use PATCH for updates as it's more reliable with Supabase
             endpoint = f"vehicles?id=eq.{vehicle_id}"
-            logger.info(f"Database: Making PATCH request to endpoint: {endpoint}")
             
             result = await self._make_request("PATCH", endpoint, update_data)
-            logger.info(f"Database: PATCH request result: {result}")
             
             # Supabase PATCH requests often return empty responses on success
             # We'll always try to fetch the updated vehicle to confirm the update worked
-            logger.info(f"Database: Fetching updated vehicle {vehicle_id} after PATCH request")
             
             # Small delay to ensure database commit
             await asyncio.sleep(0.1)
@@ -185,15 +176,10 @@ class DatabaseManager:
             # Fetch the updated vehicle with all fields
             vehicle_endpoint = f"vehicles?id=eq.{vehicle_id}&deleted_at=is.null"
             updated_vehicle = await self._make_request("GET", vehicle_endpoint)
-            logger.info(f"Database: Fetched updated vehicle: {updated_vehicle}")
             
             if isinstance(updated_vehicle, list) and len(updated_vehicle) > 0:
-                # Verify that the update actually changed the data
-                vehicle = updated_vehicle[0]
-                logger.info(f"Database: Successfully retrieved updated vehicle: {vehicle}")
-                return vehicle
+                return updated_vehicle[0]
             elif isinstance(updated_vehicle, dict):
-                logger.info(f"Database: Successfully retrieved updated vehicle: {updated_vehicle}")
                 return updated_vehicle
             else:
                 logger.error(f"Database: No vehicle data found after update for ID {vehicle_id}")
@@ -231,22 +217,15 @@ class DatabaseManager:
     async def soft_delete_vehicle(self, vehicle_id: int) -> bool:
         """Soft delete a vehicle record"""
         try:
-            logger.info(f"Database: Soft deleting vehicle {vehicle_id}")
-            
             update_data = {
                 "deleted_at": "now()"
             }
             endpoint = f"vehicles?id=eq.{vehicle_id}"
             
-            logger.info(f"Database: Making PATCH request to endpoint: {endpoint}")
-            logger.info(f"Database: Delete data: {update_data}")
-            
             result = await self._make_request("PATCH", endpoint, update_data)
-            logger.info(f"Database: Delete PATCH result: {result}")
             
             # Supabase PATCH operations return empty responses on success
             # The fact that we got here without an exception means it succeeded
-            logger.info(f"Database: Soft delete successful for vehicle {vehicle_id}")
             return True
                 
         except Exception as e:
@@ -298,16 +277,33 @@ class DatabaseManager:
         try:
             result = await self._make_request("POST", "payments", payment_data)
             
+            # Supabase often returns empty response on successful creation
+            # In this case, we'll return the original data with a success indicator
             if isinstance(result, list) and len(result) > 0:
                 return result[0]
-            elif isinstance(result, dict):
+            elif isinstance(result, dict) and result:
                 return result
+            elif isinstance(result, dict) and not result:
+                # Empty response from Supabase - this is normal for successful creation
+                from datetime import datetime
+                return {
+                    "id": 0,  # Placeholder ID (integer)
+                    "source_type": payment_data["source_type"],
+                    "source_id": payment_data["source_id"],
+                    "payment_type": payment_data["payment_type"],
+                    "payment_date": payment_data["payment_date"],
+                    "amount": payment_data["amount"],
+                    "description": payment_data["description"],
+                    "payment_status": payment_data["payment_status"],
+                    "created_at": datetime.utcnow().isoformat(),
+                    "updated_at": datetime.utcnow().isoformat()
+                }
             else:
                 return {}
                 
         except Exception as e:
             logger.error(f"Error creating payment: {e}")
-            return {}
+            raise e  # Re-raise the exception
     
     async def close_outside_interest(self, interest_id: int) -> bool:
         """Close an outside interest record"""

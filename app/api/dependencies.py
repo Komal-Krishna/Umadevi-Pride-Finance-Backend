@@ -48,5 +48,6 @@ async def get_database():
     try:
         yield db
     finally:
-        # Clean up the database connection
-        await db.close()
+        # Don't close the connection here as it's shared across requests
+        # The connection will be managed by the DatabaseManager itself
+        pass

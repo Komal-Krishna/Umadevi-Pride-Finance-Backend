@@ -19,15 +19,82 @@ async def get_all_vehicles(
     current_user: dict = Depends(get_current_user),
     db: DatabaseManager = Depends(get_database)
 ):
-    """Get all vehicles"""
+    """Get all vehicles with payment calculations"""
     try:
         vehicles = await db.get_vehicles(is_closed)
-        return vehicles
+        
+        # Calculate payment totals for each vehicle
+        enhanced_vehicles = []
+        for vehicle in vehicles:
+            try:
+                # Get payments for this vehicle
+                payments = await db.get_payments("vehicle", vehicle["id"])
+                total_payments = sum(payment.get("amount", 0) for payment in payments)
+                pending_amount = max(0, vehicle.get("principle_amount", 0) - total_payments)
+                
+                # Add calculated fields
+                vehicle["total_payments"] = total_payments
+                vehicle["pending_amount"] = pending_amount
+                vehicle["is_active"] = not vehicle.get("is_closed", False)
+                
+                enhanced_vehicles.append(vehicle)
+            except Exception as e:
+                logger.error(f"Error calculating payments for vehicle {vehicle.get('id')}: {e}")
+                # Add default values if calculation fails
+                vehicle["total_payments"] = 0
+                vehicle["pending_amount"] = vehicle.get("principle_amount", 0)
+                vehicle["is_active"] = not vehicle.get("is_closed", False)
+                enhanced_vehicles.append(vehicle)
+        
+        return enhanced_vehicles
     except Exception as e:
         logger.error(f"Error fetching vehicles: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error fetching vehicles"
+        )
+
+@router.get("/{vehicle_id}", response_model=VehicleResponse)
+async def get_vehicle_by_id(
+    vehicle_id: int,
+    current_user: dict = Depends(get_current_user),
+    db: DatabaseManager = Depends(get_database)
+):
+    """Get a specific vehicle by ID with payment calculations"""
+    try:
+        vehicle = await db.get_vehicle_by_id(vehicle_id)
+        
+        if not vehicle:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Vehicle with ID {vehicle_id} not found"
+            )
+        
+        # Calculate payment totals
+        try:
+            payments = await db.get_payments("vehicle", vehicle_id)
+            total_payments = sum(payment.get("amount", 0) for payment in payments)
+            pending_amount = max(0, vehicle.get("principle_amount", 0) - total_payments)
+            
+            # Add calculated fields
+            vehicle["total_payments"] = total_payments
+            vehicle["pending_amount"] = pending_amount
+            vehicle["is_active"] = not vehicle.get("is_closed", False)
+        except Exception as e:
+            logger.error(f"Error calculating payments for vehicle {vehicle_id}: {e}")
+            # Add default values if calculation fails
+            vehicle["total_payments"] = 0
+            vehicle["pending_amount"] = vehicle.get("principle_amount", 0)
+            vehicle["is_active"] = not vehicle.get("is_closed", False)
+        
+        return vehicle
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching vehicle {vehicle_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error fetching vehicle"
         )
 
 @router.post("/create", response_model=VehicleResponse)
@@ -47,6 +114,7 @@ async def create_vehicle(
             "date_of_lending": vehicle.date_of_lending.isoformat() if hasattr(vehicle.date_of_lending, 'isoformat') else str(vehicle.date_of_lending),
             "lend_to": vehicle.lend_to
         }
+        
         
         # Don't send updated_at, created_at, is_closed - let database handle these
         # Don't send any None values

@@ -35,8 +35,8 @@ class LoginResponse(BaseModel):
 # Vehicle Models
 class VehicleBase(BaseModel):
     vehicle_name: str = Field(..., min_length=1, max_length=100)
-    principle_amount: float = Field(..., gt=0)
-    rent: float = Field(..., gt=0)
+    principle_amount: float = Field(..., gt=0, le=99999999.99)
+    rent: float = Field(..., gt=0, le=99999999.99)
     payment_frequency: PaymentFrequency
     date_of_lending: date
     lend_to: str = Field(..., min_length=1, max_length=100)
@@ -46,8 +46,8 @@ class VehicleCreate(VehicleBase):
 
 class VehicleUpdate(BaseModel):
     vehicle_name: Optional[str] = Field(None, min_length=1, max_length=100)
-    principle_amount: Optional[float] = Field(None, gt=0)
-    rent: Optional[float] = Field(None, gt=0)
+    principle_amount: Optional[float] = Field(None, gt=0, le=99999999.99)
+    rent: Optional[float] = Field(None, gt=0, le=99999999.99)
     payment_frequency: Optional[PaymentFrequency] = None
     date_of_lending: Optional[date] = None
     lend_to: Optional[str] = Field(None, min_length=1, max_length=100)
@@ -138,6 +138,13 @@ class PaymentBase(BaseModel):
 
 class PaymentCreate(PaymentBase):
     pass
+
+# Simple payment model for vehicle payments
+class VehiclePaymentCreate(BaseModel):
+    vehicle_id: int = Field(..., gt=0)
+    amount: float = Field(..., gt=0)
+    payment_date: date
+    notes: Optional[str] = None
 
 class PaymentUpdate(BaseModel):
     source_type: Optional[SourceType] = None
