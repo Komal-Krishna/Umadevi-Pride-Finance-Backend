@@ -32,21 +32,22 @@ class DatabaseManager:
             self._initialized = True
     
     async def get_client(self):
-        """Get or create HTTP client with thread-safe async handling"""
-        async with self._client_lock:
-            if self._client is None or self._client.is_closed:
-                self._client = httpx.AsyncClient(
-                    headers={
-                        "apikey": self.service_key,
-                        "Authorization": f"Bearer {self.service_key}",
-                        "Content-Type": "application/json"
-                    },
-                    timeout=httpx.Timeout(30.0, connect=10.0),
-                    limits=httpx.Limits(max_keepalive_connections=20, max_connections=100),
-                    http2=True
-                )
-                logger.info("Created new HTTP client with connection pooling")
-            return self._client
+        """Get or create HTTP client with serverless-friendly handling"""
+        # Always create a fresh client for serverless environments
+        # This prevents event loop closure issues
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                headers={
+                    "apikey": self.service_key,
+                    "Authorization": f"Bearer {self.service_key}",
+                    "Content-Type": "application/json"
+                },
+                timeout=httpx.Timeout(30.0, connect=10.0),
+                limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
+                http2=False  # Disable HTTP/2 for better serverless compatibility
+            )
+            logger.info("Created new HTTP client for serverless environment")
+        return self._client
     
     async def close(self):
         """Close the HTTP client"""
@@ -67,7 +68,7 @@ class DatabaseManager:
         return serialized
     
     async def _make_request(self, method: str, endpoint: str, data: Dict = None, max_retries: int = 2) -> Dict:
-        """Make HTTP request to Supabase with connection pooling and retry logic"""
+        """Make HTTP request to Supabase with serverless-friendly error handling"""
         for attempt in range(max_retries + 1):
             try:
                 url = f"{self.supabase_url}/rest/v1/{endpoint}"
@@ -76,30 +77,47 @@ class DatabaseManager:
                 if data:
                     data = self._serialize_data(data)
                 
-                client = await self.get_client()
+                # Create a fresh client for each request in serverless
+                client = httpx.AsyncClient(
+                    headers={
+                        "apikey": self.service_key,
+                        "Authorization": f"Bearer {self.service_key}",
+                        "Content-Type": "application/json"
+                    },
+                    timeout=httpx.Timeout(30.0, connect=10.0),
+                    limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
+                    http2=False
+                )
                 
-                if method.upper() == "GET":
-                    response = await client.get(url)
-                elif method.upper() == "POST":
-                    response = await client.post(url, json=data)
-                elif method.upper() == "PUT":
-                    response = await client.put(url, json=data)
-                elif method.upper() == "PATCH":
-                    response = await client.patch(url, json=data)
-                elif method.upper() == "DELETE":
-                    response = await client.delete(url)
-                else:
-                    raise ValueError(f"Unsupported HTTP method: {method}")
-                
-                if response.status_code >= 400:
-                    logger.error(f"Supabase error response: {response.text}")
-                    response.raise_for_status()
-                
-                response_content = response.json() if response.content else {}
-                return response_content
+                try:
+                    if method.upper() == "GET":
+                        response = await client.get(url)
+                    elif method.upper() == "POST":
+                        response = await client.post(url, json=data)
+                    elif method.upper() == "PUT":
+                        response = await client.put(url, json=data)
+                    elif method.upper() == "PATCH":
+                        response = await client.patch(url, json=data)
+                    elif method.upper() == "DELETE":
+                        response = await client.delete(url)
+                    else:
+                        raise ValueError(f"Unsupported HTTP method: {method}")
+                    
+                    if response.status_code >= 400:
+                        logger.error(f"Supabase error response: {response.text}")
+                        response.raise_for_status()
+                    
+                    response_content = response.json() if response.content else {}
+                    logger.info(f"Supabase response content: {response_content}")
+                    return response_content
+                    
+                finally:
+                    # Always close the client
+                    await client.aclose()
                 
             except Exception as e:
                 logger.error(f"HTTP request error (attempt {attempt + 1}/{max_retries + 1}): {e}")
+                logger.error(f"Exception type: {type(e).__name__}")
                 
                 if attempt < max_retries:
                     # Wait before retry (exponential backoff)
