@@ -395,6 +395,59 @@ class DatabaseManager:
             logger.error(f"Error creating payment: {e}")
             raise e  # Re-raise the exception
     
+    async def create_outside_interest(self, interest_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a new outside interest record"""
+        try:
+            endpoint = "outside_interest"
+            result = await self._make_request("POST", endpoint, interest_data)
+            
+            # Supabase returns the created record
+            if result and isinstance(result, list) and len(result) > 0:
+                return result[0]
+            elif result and isinstance(result, dict):
+                return result
+            else:
+                # If Supabase returns empty response, construct a response
+                return {
+                    "id": interest_data.get("id", 1),  # Fallback ID
+                    "to_whom": interest_data.get("to_whom", ""),
+                    "category": interest_data.get("category", ""),
+                    "principle_amount": interest_data.get("principle_amount", 0),
+                    "interest_rate_percentage": interest_data.get("interest_rate_percentage", 0),
+                    "interest_rate_indian": interest_data.get("interest_rate_indian", 0),
+                    "payment_frequency": interest_data.get("payment_frequency", "monthly"),
+                    "date_of_lending": interest_data.get("date_of_lending", ""),
+                    "lend_to": interest_data.get("lend_to", ""),
+                    "is_closed": interest_data.get("is_closed", False),
+                    "closure_date": interest_data.get("closure_date"),
+                    "created_at": interest_data.get("created_at", ""),
+                    "updated_at": interest_data.get("updated_at", "")
+                }
+                
+        except Exception as e:
+            logger.error(f"Error creating outside interest: {e}")
+            raise e
+
+    async def update_outside_interest(self, interest_id: int, update_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Update an existing outside interest record"""
+        try:
+            endpoint = f"outside_interest?id=eq.{interest_id}"
+            result = await self._make_request("PATCH", endpoint, update_data)
+            
+            # Supabase PATCH operations return empty responses on success
+            # Fetch the updated record
+            updated_record = await self.get_outside_interest()
+            interest = next((i for i in updated_record if i["id"] == interest_id), None)
+            
+            if interest:
+                return interest
+            else:
+                raise Exception("Updated record not found")
+                
+        except Exception as e:
+            logger.error(f"Error updating outside interest: {e}")
+            raise e
+
     async def close_outside_interest(self, interest_id: int) -> bool:
         """Close an outside interest record"""
         try:
@@ -410,6 +463,19 @@ class DatabaseManager:
             return True
         except Exception as e:
             logger.error(f"Error closing outside interest: {e}")
+            return False
+
+    async def delete_outside_interest(self, interest_id: int) -> bool:
+        """Delete an outside interest record"""
+        try:
+            endpoint = f"outside_interest?id=eq.{interest_id}"
+            result = await self._make_request("DELETE", endpoint)
+            
+            # Supabase DELETE operations return empty responses on success
+            # The fact that we got here without an exception means it succeeded
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting outside interest: {e}")
             return False
 
 def get_db() -> DatabaseManager:

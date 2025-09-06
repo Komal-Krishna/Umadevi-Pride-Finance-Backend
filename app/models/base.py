@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List
 from datetime import date, datetime
 from enum import Enum
@@ -66,10 +66,28 @@ class OutsideInterestBase(BaseModel):
     to_whom: str = Field(..., min_length=1, max_length=100)
     category: str = Field(..., min_length=1, max_length=100)
     principle_amount: float = Field(..., gt=0)
-    interest_rate: float = Field(..., gt=0, le=100)
+    interest_rate_percentage: float = Field(..., gt=0, le=100, description="Interest rate as percentage per annum")
+    interest_rate_indian: float = Field(..., gt=0, le=100, description="Indian interest rate (1 rupee = 12% annually)")
     payment_frequency: PaymentFrequency
     date_of_lending: date
     lend_to: str = Field(..., min_length=1, max_length=100)
+    
+    @field_validator('interest_rate_percentage', 'interest_rate_indian')
+    @classmethod
+    def validate_interest_rates(cls, v, info):
+        # Both interest rates are required and must be consistent
+        if info.field_name == 'interest_rate_percentage':
+            # Get the other field value from the model data
+            model_data = info.data
+            indian_rate = model_data.get('interest_rate_indian')
+            if indian_rate and abs(v - (indian_rate * 12)) > 0.01:
+                raise ValueError('Interest rates are not consistent. Percentage should be Indian rate × 12')
+        elif info.field_name == 'interest_rate_indian':
+            model_data = info.data
+            percentage_rate = model_data.get('interest_rate_percentage')
+            if percentage_rate and abs(percentage_rate - (v * 12)) > 0.01:
+                raise ValueError('Interest rates are not consistent. Indian rate should be Percentage ÷ 12')
+        return v
 
 class OutsideInterestCreate(OutsideInterestBase):
     pass
@@ -78,10 +96,28 @@ class OutsideInterestUpdate(BaseModel):
     to_whom: Optional[str] = Field(None, min_length=1, max_length=100)
     category: Optional[str] = Field(None, min_length=1, max_length=100)
     principle_amount: Optional[float] = Field(None, gt=0)
-    interest_rate: Optional[float] = Field(None, gt=0, le=100)
+    interest_rate_percentage: Optional[float] = Field(None, gt=0, le=100, description="Interest rate as percentage per annum")
+    interest_rate_indian: Optional[float] = Field(None, gt=0, le=100, description="Indian interest rate (1 rupee = 12% annually)")
     payment_frequency: Optional[PaymentFrequency] = None
     date_of_lending: Optional[date] = None
     lend_to: Optional[str] = Field(None, min_length=1, max_length=100)
+    
+    @field_validator('interest_rate_percentage', 'interest_rate_indian')
+    @classmethod
+    def validate_interest_rates(cls, v, info):
+        # Both interest rates are required and must be consistent
+        if info.field_name == 'interest_rate_percentage':
+            # Get the other field value from the model data
+            model_data = info.data
+            indian_rate = model_data.get('interest_rate_indian')
+            if indian_rate and abs(v - (indian_rate * 12)) > 0.01:
+                raise ValueError('Interest rates are not consistent. Percentage should be Indian rate × 12')
+        elif info.field_name == 'interest_rate_indian':
+            model_data = info.data
+            percentage_rate = model_data.get('interest_rate_percentage')
+            if percentage_rate and abs(percentage_rate - (v * 12)) > 0.01:
+                raise ValueError('Interest rates are not consistent. Indian rate should be Percentage ÷ 12')
+        return v
 
 class OutsideInterestResponse(OutsideInterestBase):
     id: int
