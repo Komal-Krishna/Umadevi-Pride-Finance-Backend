@@ -5,29 +5,48 @@ from app.config import settings
 from typing import Dict, Any, List, Optional
 import logging
 import asyncio
+import threading
+from contextlib import asynccontextmanager
 
 logger = logging.getLogger(__name__)
 
 class DatabaseManager:
-    def __init__(self):
-        self.supabase_url = settings.supabase_url
-        self.supabase_key = settings.supabase_key
-        self.service_key = settings.supabase_service_key
-        self._client = None
+    _instance = None
+    _lock = threading.Lock()
     
-    @property
-    def client(self):
-        """Get or create HTTP client with proper async handling"""
-        if self._client is None or self._client.is_closed:
-            self._client = httpx.AsyncClient(
-                headers={
-                    "apikey": self.service_key,
-                    "Authorization": f"Bearer {self.service_key}",
-                    "Content-Type": "application/json"
-                },
-                timeout=30.0
-            )
-        return self._client
+    def __new__(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = super(DatabaseManager, cls).__new__(cls)
+                    cls._instance._initialized = False
+        return cls._instance
+    
+    def __init__(self):
+        if not self._initialized:
+            self.supabase_url = settings.supabase_url
+            self.supabase_key = settings.supabase_key
+            self.service_key = settings.supabase_service_key
+            self._client = None
+            self._client_lock = asyncio.Lock()
+            self._initialized = True
+    
+    async def get_client(self):
+        """Get or create HTTP client with thread-safe async handling"""
+        async with self._client_lock:
+            if self._client is None or self._client.is_closed:
+                self._client = httpx.AsyncClient(
+                    headers={
+                        "apikey": self.service_key,
+                        "Authorization": f"Bearer {self.service_key}",
+                        "Content-Type": "application/json"
+                    },
+                    timeout=httpx.Timeout(30.0, connect=10.0),
+                    limits=httpx.Limits(max_keepalive_connections=20, max_connections=100),
+                    http2=True
+                )
+                logger.info("Created new HTTP client with connection pooling")
+            return self._client
     
     async def close(self):
         """Close the HTTP client"""
@@ -48,7 +67,7 @@ class DatabaseManager:
         return serialized
     
     async def _make_request(self, method: str, endpoint: str, data: Dict = None) -> Dict:
-        """Make HTTP request to Supabase"""
+        """Make HTTP request to Supabase with connection pooling"""
         try:
             url = f"{self.supabase_url}/rest/v1/{endpoint}"
             
@@ -56,16 +75,18 @@ class DatabaseManager:
             if data:
                 data = self._serialize_data(data)
             
+            client = await self.get_client()
+            
             if method.upper() == "GET":
-                response = await self.client.get(url)
+                response = await client.get(url)
             elif method.upper() == "POST":
-                response = await self.client.post(url, json=data)
+                response = await client.post(url, json=data)
             elif method.upper() == "PUT":
-                response = await self.client.put(url, json=data)
+                response = await client.put(url, json=data)
             elif method.upper() == "PATCH":
-                response = await self.client.patch(url, json=data)
+                response = await client.patch(url, json=data)
             elif method.upper() == "DELETE":
-                response = await self.client.delete(url)
+                response = await client.delete(url)
             else:
                 raise ValueError(f"Unsupported HTTP method: {method}")
             
@@ -93,6 +114,63 @@ class DatabaseManager:
             return result if isinstance(result, list) else []
         except Exception as e:
             logger.error(f"Error fetching vehicles: {e}")
+            return []
+    
+    async def get_vehicles_with_payments(self, is_closed: bool = None) -> List[Dict[str, Any]]:
+        """Get vehicles with payment totals using optimized single query"""
+        try:
+            # First get all vehicles
+            vehicles = await self.get_vehicles(is_closed)
+            if not vehicles:
+                return []
+            
+            # Get all payments for all vehicles in one query
+            vehicle_ids = [str(vehicle["id"]) for vehicle in vehicles]
+            if not vehicle_ids:
+                return vehicles
+            
+            # Create filter for multiple vehicle IDs
+            vehicle_filter = ",".join(vehicle_ids)
+            endpoint = f"payments?source_type=eq.vehicle&source_id=in.({vehicle_filter})&select=source_id,amount"
+            
+            payments_result = await self._make_request("GET", endpoint)
+            payments = payments_result if isinstance(payments_result, list) else []
+            
+            # Calculate payment totals by vehicle
+            payment_totals = {}
+            for payment in payments:
+                vehicle_id = payment.get("source_id")
+                amount = payment.get("amount", 0)
+                if vehicle_id not in payment_totals:
+                    payment_totals[vehicle_id] = 0
+                payment_totals[vehicle_id] += amount
+            
+            # Add payment totals to vehicles
+            for vehicle in vehicles:
+                vehicle_id = vehicle["id"]
+                vehicle["total_payments"] = payment_totals.get(vehicle_id, 0)
+            
+            return vehicles
+            
+        except Exception as e:
+            logger.error(f"Error fetching vehicles with payments: {e}")
+            # Fallback to basic vehicles without payments
+            return await self.get_vehicles(is_closed)
+    
+    async def get_all_payments_for_vehicles(self, vehicle_ids: List[str]) -> List[Dict[str, Any]]:
+        """Get all payments for multiple vehicles in one query"""
+        try:
+            if not vehicle_ids:
+                return []
+            
+            # Create filter for multiple vehicle IDs - use proper Supabase syntax
+            vehicle_filter = ",".join(vehicle_ids)
+            endpoint = f"payments?source_type=eq.vehicle&source_id=in.({vehicle_filter})"
+            
+            result = await self._make_request("GET", endpoint)
+            return result if isinstance(result, list) else []
+        except Exception as e:
+            logger.error(f"Error fetching payments for vehicles: {e}")
             return []
     
     async def create_vehicle(self, vehicle_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -322,11 +400,6 @@ class DatabaseManager:
             logger.error(f"Error closing outside interest: {e}")
             return False
 
-# Global database instance - will be initialized when needed
-db = None
-
-def get_db():
-    global db
-    if db is None:
-        db = DatabaseManager()
-    return db
+def get_db() -> DatabaseManager:
+    """Get the singleton database instance with connection pooling"""
+    return DatabaseManager()
