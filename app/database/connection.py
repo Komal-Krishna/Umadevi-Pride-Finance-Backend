@@ -25,11 +25,8 @@ class DatabaseManager:
                     "Authorization": f"Bearer {self.service_key}",
                     "Content-Type": "application/json"
                 },
-                timeout=httpx.Timeout(30.0, connect=10.0),
-                limits=httpx.Limits(max_keepalive_connections=20, max_connections=100),
-                http2=True
+                timeout=30.0
             )
-            logger.info("Created new HTTP client connection")
         return self._client
     
     async def close(self):
@@ -37,18 +34,6 @@ class DatabaseManager:
         if self._client and not self._client.is_closed:
             await self._client.aclose()
             self._client = None
-            logger.info("HTTP client connection closed")
-    
-    async def health_check(self) -> bool:
-        """Check if database connection is healthy"""
-        try:
-            # Simple query to test connection
-            result = await self._make_request("GET", "vehicles?limit=1")
-            logger.info("Database health check passed")
-            return True
-        except Exception as e:
-            logger.error(f"Database health check failed: {e}")
-            return False
     
     def _serialize_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Convert datetime objects to ISO format strings for JSON serialization"""
@@ -63,99 +48,52 @@ class DatabaseManager:
         return serialized
     
     async def _make_request(self, method: str, endpoint: str, data: Dict = None) -> Dict:
-        """Make HTTP request to Supabase with improved error handling"""
+        """Make HTTP request to Supabase"""
         try:
             url = f"{self.supabase_url}/rest/v1/{endpoint}"
-            logger.debug(f"Making {method.upper()} request to: {url}")
             
             # Serialize data if present
             if data:
                 data = self._serialize_data(data)
-                logger.debug(f"Request data: {data}")
-            
-            # Ensure client is available
-            client = self.client
             
             if method.upper() == "GET":
-                response = await client.get(url)
+                response = await self.client.get(url)
             elif method.upper() == "POST":
-                response = await client.post(url, json=data)
+                response = await self.client.post(url, json=data)
             elif method.upper() == "PUT":
-                response = await client.put(url, json=data)
+                response = await self.client.put(url, json=data)
             elif method.upper() == "PATCH":
-                response = await client.patch(url, json=data)
+                response = await self.client.patch(url, json=data)
             elif method.upper() == "DELETE":
-                response = await client.delete(url)
+                response = await self.client.delete(url)
             else:
                 raise ValueError(f"Unsupported HTTP method: {method}")
             
-            logger.debug(f"Response status: {response.status_code}")
-            logger.debug(f"Response headers: {dict(response.headers)}")
-            
             if response.status_code >= 400:
-                logger.error(f"Supabase error response ({response.status_code}): {response.text}")
+                logger.error(f"Supabase error response: {response.text}")
                 response.raise_for_status()
             
-            # Handle empty responses
-            if not response.content:
-                logger.warning("Empty response content received")
-                return {}
+            response_content = response.json() if response.content else {}
+            return response_content
             
-            try:
-                response_content = response.json()
-                logger.debug(f"Response content type: {type(response_content)}")
-                return response_content
-            except Exception as json_error:
-                logger.error(f"Failed to parse JSON response: {json_error}")
-                logger.error(f"Raw response: {response.text}")
-                return {}
-            
-        except httpx.ConnectError as e:
-            logger.error(f"Connection error: {e}")
-            # Reset client to force reconnection
-            await self.close()
-            raise e
-        except httpx.TimeoutException as e:
-            logger.error(f"Timeout error: {e}")
-            raise e
         except Exception as e:
             logger.error(f"HTTP request error: {e}")
             raise e
     
     async def get_vehicles(self, is_closed: bool = None) -> List[Dict[str, Any]]:
         """Get vehicles with optional closed status filter"""
-        max_retries = 3
-        retry_delay = 1  # seconds
-        
-        for attempt in range(max_retries):
-            try:
-                endpoint = "vehicles"
-                if is_closed is not None:
-                    endpoint += f"?is_closed=eq.{is_closed}&deleted_at=is.null"
-                else:
-                    endpoint += "?deleted_at=is.null"
+        try:
+            endpoint = "vehicles"
+            if is_closed is not None:
+                endpoint += f"?is_closed=eq.{is_closed}&deleted_at=is.null"
+            else:
+                endpoint += "?deleted_at=is.null"
                 
-                logger.info(f"Fetching vehicles (attempt {attempt + 1}/{max_retries})")
-                result = await self._make_request("GET", endpoint)
-                
-                if isinstance(result, list):
-                    logger.info(f"Successfully fetched {len(result)} vehicles")
-                    return result
-                else:
-                    logger.warning(f"Unexpected result type: {type(result)}, value: {result}")
-                    if attempt < max_retries - 1:
-                        await asyncio.sleep(retry_delay)
-                        continue
-                    return []
-                    
-            except Exception as e:
-                logger.error(f"Error fetching vehicles (attempt {attempt + 1}/{max_retries}): {e}")
-                if attempt < max_retries - 1:
-                    await asyncio.sleep(retry_delay)
-                    continue
-                return []
-        
-        return []
+            result = await self._make_request("GET", endpoint)
+            return result if isinstance(result, list) else []
+        except Exception as e:
+            logger.error(f"Error fetching vehicles: {e}")
+            return []
     
     async def create_vehicle(self, vehicle_data: Dict[str, Any]) -> Dict[str, Any]:
         """Create a new vehicle record"""
