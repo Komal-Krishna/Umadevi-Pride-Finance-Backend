@@ -1,8 +1,9 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from contextlib import asynccontextmanager
 from app.config import settings
-from app.api.v1 import auth, vehicles, outside_interest, payments, dashboard, loans
+from app.api.v1 import auth, vehicles, outside_interest, payments, dashboard, loans, analytics
 from app.database.connection import get_db
 import logging
 
@@ -10,7 +11,18 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Uma Devi's Pride Finance API", version="1.0.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifespan with proper connection handling"""
+    # Startup
+    db = get_db()  # Initialize singleton
+    
+    yield
+    
+    # Shutdown
+    await db.close()
+
+app = FastAPI(title="Uma Devi's Pride Finance API", version="1.0.0", lifespan=lifespan)
 
 # CORS middleware
 app.add_middleware(
@@ -21,23 +33,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.on_event("startup")
-async def startup_event():
-    """Initialize database connection on startup"""
-    logger.info("Starting up Uma Devi's Pride Finance API")
-    # Initialize database connection
-    db = get_db()
-    logger.info("Database connection initialized")
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Clean up database connection on shutdown"""
-    logger.info("Shutting down Uma Devi's Pride Finance API")
-    # Clean up database connection using the proper close function
-    from app.database.connection import close_db
-    await close_db()
-    logger.info("Database connection closed")
-
 # Include routers
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(vehicles.router, prefix="/api/v1")
@@ -45,6 +40,7 @@ app.include_router(outside_interest.router, prefix="/api/v1")
 app.include_router(loans.router, prefix="/api/v1")
 app.include_router(payments.router, prefix="/api/v1")
 app.include_router(dashboard.router, prefix="/api/v1")
+app.include_router(analytics.router, prefix="/api/v1")
 
 @app.get("/")
 async def root():
