@@ -4,9 +4,8 @@ from datetime import datetime, date, timedelta
 from decimal import Decimal
 import logging
 
-from ...database import db
-from ...dependencies import get_current_user, get_database
-from ...models.analytics import (
+from app.api.dependencies import get_current_user, get_database
+from app.models.analytics import (
     DashboardAnalytics, PerformanceMetrics, PaymentAnalysis,
     VehicleAnalytics, InterestAnalytics, CustomerAnalytics,
     ChartData, AnalyticsFilter

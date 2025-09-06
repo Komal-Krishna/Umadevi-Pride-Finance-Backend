@@ -11,7 +11,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/outside-interest", tags=["Outside Interest"])
+router = APIRouter(prefix="/outside_interest", tags=["Outside Interest"])
 
 @router.get("/", response_model=List[OutsideInterestResponse])
 async def get_outside_interests(
@@ -167,7 +167,7 @@ async def close_outside_interest(
         )
 
 @router.post("/{interest_id}/payments", response_model=PaymentResponse)
-async def create_interest_payment(
+async def create_payment(
     interest_id: int,
     payment: PaymentCreate,
     current_user: dict = Depends(get_current_user),
@@ -178,6 +178,7 @@ async def create_interest_payment(
         payment_data = payment.dict()
         payment_data["source_type"] = "outside_interest"
         payment_data["source_id"] = interest_id
+        payment_data["payment_status"] = "PAID"
         payment_data["created_at"] = datetime.utcnow()
         
         created_payment = await db.create_payment(payment_data)
@@ -196,6 +197,38 @@ async def create_interest_payment(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error creating payment"
+        )
+
+@router.get("/{interest_id}/payments", response_model=List[PaymentResponse])
+async def get_payments(
+    interest_id: int,
+    current_user: dict = Depends(get_current_user),
+    db: DatabaseManager = Depends(get_database)
+):
+    """Get all payments for a specific outside interest record"""
+    try:
+        # Check if interest record exists
+        interests = await db.get_outside_interest()
+        existing_interest = next((i for i in interests if i["id"] == interest_id), None)
+        
+        if not existing_interest:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Outside interest record not found"
+            )
+        
+        # Get payments for this interest record
+        payments = await db.get_payments("outside_interest", interest_id)
+        
+        return payments
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching outside interest payments: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error fetching payments"
         )
 
 async def calculate_extended_days(interest: dict) -> Optional[int]:
@@ -250,3 +283,40 @@ async def calculate_payment_totals(db: DatabaseManager, source_type: str, source
     except Exception as e:
         logger.error(f"Error calculating payment totals: {e}")
         return 0.0, 0.0
+
+@router.delete("/{interest_id}")
+async def delete_outside_interest(
+    interest_id: int,
+    current_user: dict = Depends(get_current_user),
+    db: DatabaseManager = Depends(get_database)
+):
+    """Delete an outside interest record"""
+    try:
+        # Check if interest record exists
+        interests = await db.get_outside_interest()
+        existing_interest = next((i for i in interests if i["id"] == interest_id), None)
+        
+        if not existing_interest:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Outside interest record not found"
+            )
+        
+        # Delete interest record
+        success = await db.delete_outside_interest(interest_id)
+        
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Error deleting outside interest record"
+            )
+        
+        return {"message": "Outside interest record deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting outside interest: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error deleting outside interest record"
+        )
