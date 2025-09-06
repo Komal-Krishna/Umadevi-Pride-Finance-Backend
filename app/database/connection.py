@@ -412,19 +412,6 @@ class DatabaseManager:
             logger.error(f"Error closing outside interest: {e}")
             return False
 
-# Global database instance - singleton pattern
-_db_instance = None
-
 def get_db() -> DatabaseManager:
-    """Get the global database instance (singleton pattern)"""
-    global _db_instance
-    if _db_instance is None:
-        _db_instance = DatabaseManager()
-    return _db_instance
-
-async def close_db():
-    """Close the global database instance"""
-    global _db_instance
-    if _db_instance is not None:
-        await _db_instance.close()
-        _db_instance = None
+    """Get the singleton database instance with connection pooling"""
+    return DatabaseManager()
