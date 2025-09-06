@@ -46,7 +46,6 @@ class DatabaseManager:
                 limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
                 http2=False  # Disable HTTP/2 for better serverless compatibility
             )
-            logger.info("Created new HTTP client for serverless environment")
         return self._client
     
     async def close(self):
@@ -108,7 +107,6 @@ class DatabaseManager:
                         response.raise_for_status()
                     
                     response_content = response.json() if response.content else {}
-                    logger.info(f"Supabase response content: {response_content}")
                     return response_content
                     
                 finally:
@@ -116,13 +114,9 @@ class DatabaseManager:
                     await client.aclose()
                 
             except Exception as e:
-                logger.error(f"HTTP request error (attempt {attempt + 1}/{max_retries + 1}): {e}")
-                logger.error(f"Exception type: {type(e).__name__}")
-                
                 if attempt < max_retries:
                     # Wait before retry (exponential backoff)
                     await asyncio.sleep(0.5 * (2 ** attempt))
-                    logger.info(f"Retrying request (attempt {attempt + 2})")
                     continue
                 else:
                     # Final attempt failed
@@ -137,19 +131,11 @@ class DatabaseManager:
             else:
                 endpoint += "?deleted_at=is.null"
             
-            logger.info(f"Fetching vehicles with endpoint: {endpoint}")
             result = await self._make_request("GET", endpoint)
-            
-            if isinstance(result, list):
-                logger.info(f"Successfully fetched {len(result)} vehicles")
-                return result
-            else:
-                logger.warning(f"Unexpected result type: {type(result)}, value: {result}")
-                return []
+            return result if isinstance(result, list) else []
                 
         except Exception as e:
             logger.error(f"Error fetching vehicles: {e}")
-            logger.error(f"Exception type: {type(e).__name__}")
             return []
     
     async def get_vehicles_with_payments(self, is_closed: bool = None) -> List[Dict[str, Any]]:
@@ -157,26 +143,21 @@ class DatabaseManager:
         try:
             # First get all vehicles
             vehicles = await self.get_vehicles(is_closed)
-            logger.info(f"Retrieved {len(vehicles)} vehicles from database")
             
             if not vehicles:
-                logger.warning("No vehicles found in database")
                 return []
             
             # Get all payments for all vehicles in one query
             vehicle_ids = [str(vehicle["id"]) for vehicle in vehicles]
             if not vehicle_ids:
-                logger.warning("No vehicle IDs found")
                 return vehicles
             
             # Create filter for multiple vehicle IDs
             vehicle_filter = ",".join(vehicle_ids)
             endpoint = f"payments?source_type=eq.vehicle&source_id=in.({vehicle_filter})&select=source_id,amount"
-            logger.info(f"Fetching payments for vehicles: {vehicle_ids}")
             
             payments_result = await self._make_request("GET", endpoint)
             payments = payments_result if isinstance(payments_result, list) else []
-            logger.info(f"Retrieved {len(payments)} payments from database")
             
             # Calculate payment totals by vehicle
             payment_totals = {}
@@ -192,36 +173,17 @@ class DatabaseManager:
                 vehicle_id = vehicle["id"]
                 vehicle["total_payments"] = payment_totals.get(vehicle_id, 0)
             
-            logger.info(f"Returning {len(vehicles)} vehicles with payment calculations")
             return vehicles
             
         except Exception as e:
             logger.error(f"Error fetching vehicles with payments: {e}")
-            logger.error(f"Exception type: {type(e).__name__}")
             # Fallback to basic vehicles without payments
             try:
                 fallback_vehicles = await self.get_vehicles(is_closed)
-                logger.info(f"Fallback returned {len(fallback_vehicles)} vehicles")
                 return fallback_vehicles
             except Exception as fallback_error:
                 logger.error(f"Fallback also failed: {fallback_error}")
                 return []
-    
-    async def get_all_payments_for_vehicles(self, vehicle_ids: List[str]) -> List[Dict[str, Any]]:
-        """Get all payments for multiple vehicles in one query"""
-        try:
-            if not vehicle_ids:
-                return []
-            
-            # Create filter for multiple vehicle IDs - use proper Supabase syntax
-            vehicle_filter = ",".join(vehicle_ids)
-            endpoint = f"payments?source_type=eq.vehicle&source_id=in.({vehicle_filter})"
-            
-            result = await self._make_request("GET", endpoint)
-            return result if isinstance(result, list) else []
-        except Exception as e:
-            logger.error(f"Error fetching payments for vehicles: {e}")
-            return []
     
     async def create_vehicle(self, vehicle_data: Dict[str, Any]) -> Dict[str, Any]:
         """Create a new vehicle record"""

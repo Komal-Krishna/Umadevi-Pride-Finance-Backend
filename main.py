@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from app.config import settings
-from app.api.v1 import auth, vehicles, outside_interest, payments, dashboard, loans
+from app.api.v1 import auth, vehicles, outside_interest, payments, dashboard, loans, analytics
 from app.database.connection import get_db
 import logging
 
@@ -15,16 +15,12 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Manage application lifespan with proper connection handling"""
     # Startup
-    logger.info("Starting up Uma Devi's Pride Finance API")
     db = get_db()  # Initialize singleton
-    logger.info("Database connection pool initialized")
     
     yield
     
     # Shutdown
-    logger.info("Shutting down Uma Devi's Pride Finance API")
     await db.close()
-    logger.info("Database connection pool closed")
 
 app = FastAPI(title="Uma Devi's Pride Finance API", version="1.0.0", lifespan=lifespan)
 
@@ -44,6 +40,7 @@ app.include_router(outside_interest.router, prefix="/api/v1")
 app.include_router(loans.router, prefix="/api/v1")
 app.include_router(payments.router, prefix="/api/v1")
 app.include_router(dashboard.router, prefix="/api/v1")
+app.include_router(analytics.router, prefix="/api/v1")
 
 @app.get("/")
 async def root():
