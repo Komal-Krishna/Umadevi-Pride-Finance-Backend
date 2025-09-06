@@ -19,36 +19,54 @@ async def get_all_vehicles(
     current_user: dict = Depends(get_current_user),
     db: DatabaseManager = Depends(get_database)
 ):
-    """Get all vehicles with payment calculations"""
+    """Get all vehicles with payment calculations using optimized single query"""
     try:
-        vehicles = await db.get_vehicles(is_closed)
+        # Try the optimized method first
+        vehicles = await db.get_vehicles_with_payments(is_closed)
         
-        # Calculate payment totals for each vehicle
+        # If we get empty results, try fallback to basic vehicles
+        if not vehicles:
+            logger.warning("Optimized method returned empty, trying fallback")
+            vehicles = await db.get_vehicles(is_closed)
+            
+            # If still empty, there might be a database issue
+            if not vehicles:
+                logger.error("Both optimized and fallback methods returned empty")
+                return []
+        
+        # Add calculated fields
         enhanced_vehicles = []
         for vehicle in vehicles:
-            try:
-                # Get payments for this vehicle
-                payments = await db.get_payments("vehicle", vehicle["id"])
-                total_payments = sum(payment.get("amount", 0) for payment in payments)
-                pending_amount = max(0, vehicle.get("principle_amount", 0) - total_payments)
-                
-                # Add calculated fields
-                vehicle["total_payments"] = total_payments
-                vehicle["pending_amount"] = pending_amount
-                vehicle["is_active"] = not vehicle.get("is_closed", False)
-                
-                enhanced_vehicles.append(vehicle)
-            except Exception as e:
-                logger.error(f"Error calculating payments for vehicle {vehicle.get('id')}: {e}")
-                # Add default values if calculation fails
-                vehicle["total_payments"] = 0
-                vehicle["pending_amount"] = vehicle.get("principle_amount", 0)
-                vehicle["is_active"] = not vehicle.get("is_closed", False)
-                enhanced_vehicles.append(vehicle)
+            total_payments = vehicle.get("total_payments", 0)
+            principle_amount = vehicle.get("principle_amount", 0)
+            
+            vehicle["total_payments"] = total_payments
+            vehicle["pending_amount"] = max(0, principle_amount - total_payments)
+            vehicle["is_active"] = not vehicle.get("is_closed", False)
+            enhanced_vehicles.append(vehicle)
         
+        logger.info(f"Returning {len(enhanced_vehicles)} vehicles to client")
         return enhanced_vehicles
+        
     except Exception as e:
         logger.error(f"Error fetching vehicles: {e}")
+        logger.error(f"Exception type: {type(e).__name__}")
+        
+        # Try one more fallback
+        try:
+            logger.info("Attempting emergency fallback")
+            vehicles = await db.get_vehicles(is_closed)
+            if vehicles:
+                # Add basic fields without payment calculations
+                for vehicle in vehicles:
+                    vehicle["total_payments"] = 0
+                    vehicle["pending_amount"] = vehicle.get("principle_amount", 0)
+                    vehicle["is_active"] = not vehicle.get("is_closed", False)
+                logger.info(f"Emergency fallback returned {len(vehicles)} vehicles")
+                return vehicles
+        except Exception as fallback_error:
+            logger.error(f"Emergency fallback also failed: {fallback_error}")
+        
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error fetching vehicles"
