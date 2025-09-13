@@ -98,7 +98,7 @@ async def create_loan(
         logger.error(f"Error creating loan: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error creating loan record"
+            detail=f"Error creating loan record: {str(e)}"
         )
 
 @router.put("/{loan_id}", response_model=LoanResponse)
@@ -166,6 +166,75 @@ async def close_loan(
             detail="Error closing loan record"
         )
 
+@router.delete("/{loan_id}")
+async def delete_loan(
+    loan_id: int,
+    current_user: dict = Depends(get_current_user),
+    db: DatabaseManager = Depends(get_database)
+):
+    """Delete a loan record"""
+    try:
+        # Check if loan record exists
+        loans = await db.get_loans()
+        existing_loan = next((l for l in loans if l["id"] == loan_id), None)
+        
+        if not existing_loan:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Loan record not found"
+            )
+        
+        # Delete loan record
+        success = await db.delete_loan(loan_id)
+        
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Error deleting loan record"
+            )
+        
+        return {"message": "Loan record deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting loan: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error deleting loan record"
+        )
+
+@router.get("/{loan_id}/payments", response_model=List[PaymentResponse])
+async def get_loan_payments(
+    loan_id: int,
+    current_user: dict = Depends(get_current_user),
+    db: DatabaseManager = Depends(get_database)
+):
+    """Get all payments for a specific loan record"""
+    try:
+        # Check if loan record exists
+        loans = await db.get_loans()
+        existing_loan = next((l for l in loans if l["id"] == loan_id), None)
+        
+        if not existing_loan:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Loan record not found"
+            )
+        
+        # Get payments for this loan record
+        payments = await db.get_payments("loan", loan_id)
+        
+        return payments
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching loan payments: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error fetching payments"
+        )
+
 @router.post("/{loan_id}/payments", response_model=PaymentResponse)
 async def create_loan_payment(
     loan_id: int,
@@ -201,10 +270,13 @@ async def create_loan_payment(
 async def calculate_extended_days(loan: dict) -> Optional[int]:
     """Calculate extended days beyond exact months"""
     try:
-        if loan["is_closed"]:
+        if loan.get("is_closed", False):
             return None
         
-        borrowing_date = loan["date_of_borrowing"]
+        borrowing_date = loan.get("date_of_borrowing")
+        if not borrowing_date:
+            return None
+            
         if isinstance(borrowing_date, str):
             borrowing_date = datetime.strptime(borrowing_date, "%Y-%m-%d").date()
         
@@ -214,12 +286,15 @@ async def calculate_extended_days(loan: dict) -> Optional[int]:
         months_diff = (today.year - borrowing_date.year) * 12 + (today.month - borrowing_date.month)
         
         # Calculate expected end date based on payment frequency
-        if loan["payment_frequency"] == "monthly":
+        payment_frequency = loan.get("payment_frequency", "monthly")
+        if payment_frequency == "monthly":
             expected_months = months_diff
-        elif loan["payment_frequency"] == "bimonthly":
+        elif payment_frequency == "bimonthly":
             expected_months = months_diff * 2
-        elif loan["payment_frequency"] == "quarterly":
+        elif payment_frequency == "quarterly":
             expected_months = months_diff * 3
+        else:
+            expected_months = months_diff
         
         # Calculate expected end date
         expected_end_date = borrowing_date.replace(day=1)
@@ -243,8 +318,17 @@ async def calculate_payment_totals(db: DatabaseManager, source_type: str, source
     try:
         payments = await db.get_payments(source_type, source_id)
         
-        total_payments = sum(p["amount"] for p in payments if p["payment_type"] == "credit")
-        pending_amount = sum(p["amount"] for p in payments if p["payment_type"] == "debit")
+        total_payments = 0.0
+        pending_amount = 0.0
+        
+        for payment in payments:
+            amount = payment.get("amount", 0)
+            payment_type = payment.get("payment_type", "")
+            
+            if payment_type == "credit":
+                total_payments += amount
+            elif payment_type == "debit":
+                pending_amount += amount
         
         return total_payments, pending_amount
     except Exception as e:
