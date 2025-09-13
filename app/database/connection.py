@@ -478,6 +478,152 @@ class DatabaseManager:
             logger.error(f"Error deleting outside interest: {e}")
             return False
 
+    # Loan-related methods
+    async def get_loans(self, is_closed: bool = None) -> List[Dict[str, Any]]:
+        """Get loans with optional closed status filter"""
+        try:
+            endpoint = "loans"
+            if is_closed is not None:
+                endpoint += f"?is_closed=eq.{is_closed}&deleted_at=is.null"
+            else:
+                endpoint += "?deleted_at=is.null"
+                
+            result = await self._make_request("GET", endpoint)
+            loans = result if isinstance(result, list) else []
+            
+            # Add default value for interest_rate_indian if the column doesn't exist
+            for loan in loans:
+                if 'interest_rate_indian' not in loan and 'interest_rate' in loan:
+                    # Calculate Indian rate from percentage (divide by 12)
+                    loan['interest_rate_indian'] = loan['interest_rate'] / 12
+            
+            return loans
+        except Exception as e:
+            logger.error(f"Error fetching loans: {e}")
+            return []
+
+    async def create_loan(self, loan_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a new loan record"""
+        try:
+            # Remove any None values that might cause issues
+            clean_data = {k: v for k, v in loan_data.items() if v is not None}
+            
+            # Handle interest_rate_indian field
+            if 'interest_rate_indian' in clean_data:
+                # Ensure the value is valid for the constraint
+                indian_rate = clean_data.get('interest_rate_indian', 0)
+                if indian_rate <= 0:
+                    # Calculate from percentage if not provided or invalid
+                    percentage = clean_data.get('interest_rate', 0)
+                    clean_data['interest_rate_indian'] = percentage / 12 if percentage > 0 else 1.0
+            else:
+                # Provide default value if missing
+                percentage = clean_data.get('interest_rate', 0)
+                clean_data['interest_rate_indian'] = percentage / 12 if percentage > 0 else 1.0
+            
+            # Remove created_at as it's handled by the database
+            clean_data.pop('created_at', None)
+            
+            result = await self._make_request("POST", "loans", clean_data)
+            
+            # Supabase returns the created record in the response
+            if isinstance(result, list) and len(result) > 0:
+                created_loan = result[0]
+                # Ensure we have the ID from the response
+                if "id" in created_loan:
+                    return created_loan
+            elif isinstance(result, dict) and "id" in result:
+                return result
+            
+            # If we don't get a proper response with ID, try to fetch the created loan
+            loans = await self.get_loans()
+            if loans:
+                # Find the most recent loan with matching details
+                for loan in reversed(loans):
+                    if (loan.get('lender_name') == clean_data.get('lender_name') and
+                        loan.get('principle_amount') == clean_data.get('principle_amount')):
+                        return loan
+            
+            # If we still can't find it, raise an error
+            raise Exception("Failed to create loan or retrieve created loan data")
+                
+        except Exception as e:
+            logger.error(f"Error creating loan: {e}")
+            raise e
+
+    async def update_loan(self, loan_id: int, update_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Update a loan record"""
+        try:
+            # Remove fields that might not exist in the database yet
+            # This is a temporary fix until the database migration is applied
+            clean_update_data = {k: v for k, v in update_data.items() if v is not None}
+            clean_update_data.pop('interest_rate_indian', None)
+            
+            # Use PATCH for updates as it's more reliable with Supabase
+            endpoint = f"loans?id=eq.{loan_id}"
+            
+            result = await self._make_request("PATCH", endpoint, clean_update_data)
+            
+            # Supabase PATCH requests often return empty responses on success
+            # We'll always try to fetch the updated loan to confirm the update worked
+            
+            # Small delay to ensure database commit
+            await asyncio.sleep(0.1)
+            
+            # Fetch the updated loan with all fields
+            loan_endpoint = f"loans?id=eq.{loan_id}&deleted_at=is.null"
+            updated_loan = await self._make_request("GET", loan_endpoint)
+            
+            if isinstance(updated_loan, list) and len(updated_loan) > 0:
+                return updated_loan[0]
+            elif isinstance(updated_loan, dict):
+                return updated_loan
+            else:
+                logger.error(f"Database: No loan data found after update for ID {loan_id}")
+                logger.error(f"Database: This might indicate the loan was deleted or the update failed")
+                return {}
+                
+        except Exception as e:
+            logger.error(f"Database: Error updating loan {loan_id}: {e}")
+            # Check if it's a specific Supabase error
+            if "400 Bad Request" in str(e):
+                logger.error(f"Database: Supabase rejected the update request - check data format and constraints")
+            elif "404 Not Found" in str(e):
+                logger.error(f"Database: Loan {loan_id} not found in database")
+            elif "500 Internal Server Error" in str(e):
+                logger.error(f"Database: Supabase internal error during update")
+            return {}
+
+    async def close_loan(self, loan_id: int) -> bool:
+        """Close a loan record"""
+        try:
+            update_data = {
+                "is_closed": True,
+                "closure_date": "now()"
+            }
+            endpoint = f"loans?id=eq.{loan_id}"
+            result = await self._make_request("PATCH", endpoint, update_data)
+            
+            # Supabase PATCH operations return empty responses on success
+            # The fact that we got here without an exception means it succeeded
+            return True
+        except Exception as e:
+            logger.error(f"Error closing loan: {e}")
+            return False
+
+    async def delete_loan(self, loan_id: int) -> bool:
+        """Delete a loan record"""
+        try:
+            endpoint = f"loans?id=eq.{loan_id}"
+            result = await self._make_request("DELETE", endpoint)
+            
+            # Supabase DELETE operations return empty responses on success
+            # The fact that we got here without an exception means it succeeded
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting loan: {e}")
+            return False
+
 def get_db() -> DatabaseManager:
     """Get the singleton database instance with connection pooling"""
     return DatabaseManager()

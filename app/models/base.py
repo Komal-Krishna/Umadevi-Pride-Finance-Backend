@@ -129,16 +129,12 @@ class OutsideInterestResponse(OutsideInterestBase):
     pending_amount: float = 0.0
 
 # Loan Models
-class LenderType(str, Enum):
-    bank = "bank"
-    personal = "personal"
-    other = "other"
-
 class LoanBase(BaseModel):
     lender_name: str = Field(..., min_length=1, max_length=100)
-    lender_type: LenderType
+    lender_type: str = Field(..., min_length=1, max_length=100)
     principle_amount: float = Field(..., gt=0)
     interest_rate: float = Field(..., gt=0, le=100)
+    interest_rate_indian: float = Field(..., gt=0, le=100)
     payment_frequency: PaymentFrequency
     date_of_borrowing: date
 
@@ -147,9 +143,10 @@ class LoanCreate(LoanBase):
 
 class LoanUpdate(BaseModel):
     lender_name: Optional[str] = Field(None, min_length=1, max_length=100)
-    lender_type: Optional[LenderType] = None
+    lender_type: Optional[str] = Field(None, min_length=1, max_length=100)
     principle_amount: Optional[float] = Field(None, gt=0)
     interest_rate: Optional[float] = Field(None, gt=0, le=100)
+    interest_rate_indian: Optional[float] = Field(None, gt=0, le=100)
     payment_frequency: Optional[PaymentFrequency] = None
     date_of_borrowing: Optional[date] = None
 

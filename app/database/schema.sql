@@ -56,9 +56,10 @@ CREATE TABLE IF NOT EXISTS payments (
 CREATE TABLE IF NOT EXISTS loans (
     id SERIAL PRIMARY KEY,
     lender_name VARCHAR(100) NOT NULL,
-    lender_type VARCHAR(20) NOT NULL CHECK (lender_type IN ('bank', 'personal', 'other')),
+    lender_type VARCHAR(100) NOT NULL,
     principle_amount DECIMAL(10,2) NOT NULL CHECK (principle_amount > 0),
     interest_rate DECIMAL(5,2) NOT NULL CHECK (interest_rate > 0 AND interest_rate <= 100),
+    interest_rate_indian DECIMAL(5,2) NOT NULL CHECK (interest_rate_indian > 0 AND interest_rate_indian <= 100),
     payment_frequency VARCHAR(20) NOT NULL DEFAULT 'monthly' CHECK (payment_frequency IN ('monthly', 'bimonthly', 'quarterly')),
     date_of_borrowing DATE NOT NULL,
     is_closed BOOLEAN NOT NULL DEFAULT FALSE,
