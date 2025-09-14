@@ -4,6 +4,15 @@
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
+-- Create reusable function to auto-update updated_at
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 -- 1. Vehicles Table
 CREATE TABLE IF NOT EXISTS vehicles (
     id SERIAL PRIMARY KEY,
@@ -41,7 +50,7 @@ CREATE TABLE IF NOT EXISTS outside_interest (
 -- 3. Payments Table
 CREATE TABLE IF NOT EXISTS payments (
     id SERIAL PRIMARY KEY,
-    source_type VARCHAR(20) NOT NULL CHECK (source_type IN ('vehicle', 'outside_interest', 'loan', 'other')),
+    source_type VARCHAR(20) NOT NULL CHECK (source_type IN ('vehicle', 'outside_interest', 'loan', 'chit', 'other')),
     source_id INTEGER NULL,
     payment_type VARCHAR(20) NOT NULL CHECK (payment_type IN ('credit', 'debit')),
     payment_date DATE NOT NULL,
@@ -69,6 +78,25 @@ CREATE TABLE IF NOT EXISTS loans (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 5. Chits Table
+CREATE TABLE IF NOT EXISTS chits (
+    id SERIAL PRIMARY KEY,
+    chit_name VARCHAR(100) NOT NULL,
+    total_amount DECIMAL(10,2) NOT NULL CHECK (total_amount > 0),
+    duration_months INTEGER NOT NULL CHECK (duration_months > 0),
+    monthly_amount DECIMAL(10,2) NOT NULL CHECK (monthly_amount > 0),
+    to_whom VARCHAR(100) NOT NULL,
+    start_date DATE NOT NULL,
+    is_closed BOOLEAN NOT NULL DEFAULT FALSE,
+    closure_date DATE NULL,
+    is_collected BOOLEAN NOT NULL DEFAULT FALSE,
+    collected_amount DECIMAL(10,2) NULL,
+    collected_date DATE NULL,
+    deleted_at TIMESTAMP WITH TIME ZONE NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_vehicles_lend_to ON vehicles(lend_to);
 CREATE INDEX IF NOT EXISTS idx_vehicles_is_closed ON vehicles(is_closed);
@@ -88,6 +116,11 @@ CREATE INDEX IF NOT EXISTS idx_payments_payment_status ON payments(payment_statu
 CREATE INDEX IF NOT EXISTS idx_loans_lender_name ON loans(lender_name);
 CREATE INDEX IF NOT EXISTS idx_loans_is_closed ON loans(is_closed);
 CREATE INDEX IF NOT EXISTS idx_loans_deleted_at ON loans(deleted_at);
+
+CREATE INDEX IF NOT EXISTS idx_chits_to_whom ON chits(to_whom);
+CREATE INDEX IF NOT EXISTS idx_chits_is_closed ON chits(is_closed);
+CREATE INDEX IF NOT EXISTS idx_chits_start_date ON chits(start_date);
+CREATE INDEX IF NOT EXISTS idx_chits_deleted_at ON chits(deleted_at);
 
 -- Create updated_at trigger function
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -109,4 +142,7 @@ CREATE TRIGGER update_payments_updated_at BEFORE UPDATE ON payments
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_loans_updated_at BEFORE UPDATE ON loans
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_chits_updated_at BEFORE UPDATE ON chits
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

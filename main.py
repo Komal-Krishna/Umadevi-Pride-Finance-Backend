@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from app.config import settings
-from app.api.v1 import auth, vehicles, outside_interest, payments, dashboard, loans, analytics
+from app.api.v1 import auth, vehicles, outside_interest, payments, dashboard, loans, chits
 from app.database.connection import get_db
 import logging
 
@@ -38,9 +38,9 @@ app.include_router(auth.router, prefix="/api/v1")
 app.include_router(vehicles.router, prefix="/api/v1")
 app.include_router(outside_interest.router, prefix="/api/v1")
 app.include_router(loans.router, prefix="/api/v1")
+app.include_router(chits.router, prefix="/api/v1")
 app.include_router(payments.router, prefix="/api/v1")
 app.include_router(dashboard.router, prefix="/api/v1")
-app.include_router(analytics.router, prefix="/api/v1")
 
 @app.get("/")
 async def root():
