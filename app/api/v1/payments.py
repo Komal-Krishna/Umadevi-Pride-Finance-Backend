@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/payments", tags=["Payments"])
 
-@router.get("/", response_model=List[PaymentResponse])
+@router.get("/", response_model=List[dict])
 async def get_payments(
     vehicle_id: Optional[int] = None,
     source_type: Optional[str] = None,
@@ -18,20 +18,71 @@ async def get_payments(
     current_user: dict = Depends(get_current_user),
     db: DatabaseManager = Depends(get_database)
 ):
-    """Get all payments with optional filters"""
+    """Get all payments with enhanced information from related tables"""
     try:
-        # If vehicle_id is provided, use it as source_id with source_type as 'vehicle'
+        # Get base payments
         if vehicle_id:
             payments = await db.get_payments("vehicle", vehicle_id)
         else:
             payments = await db.get_payments(source_type, source_id)
-        return payments
+        
+        # Get related data for all source types
+        vehicles = await db.get_vehicles()
+        loans = await db.get_loans()
+        outside_interests = await db.get_outside_interest()
+        
+        # Create lookup dictionaries
+        vehicle_lookup = {v["id"]: v for v in vehicles}
+        loan_lookup = {l["id"]: l for l in loans}
+        outside_interest_lookup = {oi["id"]: oi for oi in outside_interests}
+        
+        # Enhance payments with related information
+        enhanced_payments = []
+        for payment in payments:
+            enhanced_payment = payment.copy()
+            
+            # Add source information based on source_type and source_id
+            if payment["source_type"] == "vehicle" and payment.get("source_id"):
+                vehicle = vehicle_lookup.get(payment["source_id"])
+                if vehicle:
+                    enhanced_payment["source_name"] = vehicle["vehicle_name"]
+                    enhanced_payment["source_detail"] = f"Lent to: {vehicle['lend_to']}"
+                else:
+                    enhanced_payment["source_name"] = f"Vehicle #{payment['source_id']}"
+                    enhanced_payment["source_detail"] = "Vehicle not found"
+            
+            elif payment["source_type"] == "loan" and payment.get("source_id"):
+                loan = loan_lookup.get(payment["source_id"])
+                if loan:
+                    enhanced_payment["source_name"] = loan["lender_name"]
+                    enhanced_payment["source_detail"] = f"Type: {loan['lender_type']}"
+                else:
+                    enhanced_payment["source_name"] = f"Loan #{payment['source_id']}"
+                    enhanced_payment["source_detail"] = "Loan not found"
+            
+            elif payment["source_type"] == "outside_interest" and payment.get("source_id"):
+                outside_interest = outside_interest_lookup.get(payment["source_id"])
+                if outside_interest:
+                    enhanced_payment["source_name"] = outside_interest["to_whom"]
+                    enhanced_payment["source_detail"] = f"Category: {outside_interest['category']}"
+                else:
+                    enhanced_payment["source_name"] = f"Outside Interest #{payment['source_id']}"
+                    enhanced_payment["source_detail"] = "Outside Interest not found"
+            
+            else:
+                enhanced_payment["source_name"] = payment["source_type"].title()
+                enhanced_payment["source_detail"] = "Other"
+            
+            enhanced_payments.append(enhanced_payment)
+        
+        return enhanced_payments
     except Exception as e:
         logger.error(f"Error fetching payments: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error fetching payments"
         )
+
 
 @router.get("/{payment_id}", response_model=PaymentResponse)
 async def get_payment(
