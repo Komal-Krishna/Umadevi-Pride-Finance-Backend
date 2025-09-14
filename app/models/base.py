@@ -21,6 +21,7 @@ class SourceType(str, Enum):
     vehicle = "vehicle"
     outside_interest = "outside_interest"
     loan = "loan"
+    chit = "chit"
     other = "other"
 
 # Authentication Models
@@ -158,6 +159,43 @@ class LoanResponse(LoanBase):
     extended_days: Optional[int] = None
     total_payments: float = 0.0
     pending_amount: float = 0.0
+
+# Chit Models
+class ChitBase(BaseModel):
+    chit_name: str = Field(..., min_length=1, max_length=100)
+    total_amount: float = Field(..., gt=0)
+    duration_months: int = Field(..., gt=0)
+    to_whom: str = Field(..., min_length=1, max_length=100)
+    start_date: date
+
+class ChitCreate(ChitBase):
+    pass
+
+class ChitUpdate(BaseModel):
+    chit_name: Optional[str] = Field(None, min_length=1, max_length=100)
+    total_amount: Optional[float] = Field(None, gt=0)
+    duration_months: Optional[int] = Field(None, gt=0)
+    to_whom: Optional[str] = Field(None, min_length=1, max_length=100)
+    start_date: Optional[date] = None
+
+class ChitCollect(BaseModel):
+    collected_amount: float = Field(..., gt=0)
+    collected_date: date
+
+class ChitResponse(ChitBase):
+    id: int
+    monthly_amount: float
+    is_closed: bool
+    closure_date: Optional[date] = None
+    is_collected: bool = False
+    collected_amount: Optional[float] = None
+    collected_date: Optional[date] = None
+    created_at: datetime
+    total_payments: float = 0.0
+    total_profit: float = 0.0
+    profit_percentage: float = 0.0
+    net_profit: float = 0.0
+    net_profit_percentage: float = 0.0
 
 # Payment Models
 class PaymentBase(BaseModel):

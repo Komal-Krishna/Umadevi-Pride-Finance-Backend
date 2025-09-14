@@ -662,6 +662,147 @@ class DatabaseManager:
             logger.error(f"Error deleting loan: {e}")
             return False
 
+    # Chit-related methods
+    async def get_chits(self, is_closed: bool = None) -> List[Dict[str, Any]]:
+        """Get chits with optional closed status filter"""
+        try:
+            endpoint = "chits"
+            if is_closed is not None:
+                endpoint += f"?is_closed=eq.{is_closed}&deleted_at=is.null"
+            else:
+                endpoint += "?deleted_at=is.null"
+                
+            result = await self._make_request("GET", endpoint)
+            return result if isinstance(result, list) else []
+        except Exception as e:
+            logger.error(f"Error fetching chits: {e}")
+            return []
+
+    async def get_chit_by_id(self, chit_id: int) -> Optional[Dict[str, Any]]:
+        """Get a specific chit by ID"""
+        try:
+            endpoint = f"chits?id=eq.{chit_id}&deleted_at=is.null"
+            result = await self._make_request("GET", endpoint)
+            
+            if isinstance(result, list) and len(result) > 0:
+                return result[0]
+            elif isinstance(result, dict):
+                return result
+            else:
+                return None
+        except Exception as e:
+            logger.error(f"Error fetching chit {chit_id}: {e}")
+            return None
+
+    async def create_chit(self, chit_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a new chit record"""
+        try:
+            # Remove any None values that might cause issues
+            clean_data = {k: v for k, v in chit_data.items() if v is not None}
+            
+            result = await self._make_request("POST", "chits", clean_data)
+            
+            # Supabase returns the created record in the response
+            if isinstance(result, list) and len(result) > 0:
+                created_chit = result[0]
+                # Ensure we have the ID from the response
+                if "id" in created_chit:
+                    return created_chit
+            elif isinstance(result, dict) and "id" in result:
+                return result
+            
+            # If we don't get a proper response with ID, try to fetch the created chit
+            chits = await self.get_chits()
+            if chits:
+                # Find the most recent chit with matching details
+                for chit in reversed(chits):
+                    if (chit.get('chit_name') == clean_data.get('chit_name') and
+                        chit.get('to_whom') == clean_data.get('to_whom') and
+                        chit.get('total_amount') == clean_data.get('total_amount')):
+                        return chit
+            
+            # If we still can't find it, raise an error
+            raise Exception("Failed to create chit or retrieve created chit data")
+                
+        except Exception as e:
+            logger.error(f"Error creating chit: {e}")
+            raise e
+
+    async def update_chit(self, chit_id: int, update_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Update a chit record"""
+        try:
+            # Use PATCH for updates as it's more reliable with Supabase
+            endpoint = f"chits?id=eq.{chit_id}"
+            
+            result = await self._make_request("PATCH", endpoint, update_data)
+            
+            # Supabase PATCH requests often return empty responses on success
+            # We'll always try to fetch the updated chit to confirm the update worked
+            
+            # Small delay to ensure database commit
+            await asyncio.sleep(0.1)
+            
+            # Fetch the updated chit with all fields
+            updated_chit = await self.get_chit_by_id(chit_id)
+            
+            if updated_chit:
+                return updated_chit
+            else:
+                logger.error(f"Database: No chit data found after update for ID {chit_id}")
+                return {}
+                
+        except Exception as e:
+            logger.error(f"Database: Error updating chit {chit_id}: {e}")
+            return {}
+
+    async def close_chit(self, chit_id: int) -> bool:
+        """Close a chit record"""
+        try:
+            update_data = {
+                "is_closed": True,
+                "closure_date": "now()"
+            }
+            endpoint = f"chits?id=eq.{chit_id}"
+            result = await self._make_request("PATCH", endpoint, update_data)
+            
+            # Supabase PATCH operations return empty responses on success
+            # The fact that we got here without an exception means it succeeded
+            return True
+        except Exception as e:
+            logger.error(f"Error closing chit: {e}")
+            return False
+
+    async def collect_chit(self, chit_id: int, collected_amount: float, collected_date: str) -> bool:
+        """Mark a chit as collected"""
+        try:
+            update_data = {
+                "is_collected": True,
+                "collected_amount": collected_amount,
+                "collected_date": collected_date
+            }
+            endpoint = f"chits?id=eq.{chit_id}"
+            result = await self._make_request("PATCH", endpoint, update_data)
+            
+            # Supabase PATCH operations return empty responses on success
+            # The fact that we got here without an exception means it succeeded
+            return True
+        except Exception as e:
+            logger.error(f"Error collecting chit: {e}")
+            return False
+
+    async def delete_chit(self, chit_id: int) -> bool:
+        """Delete a chit record"""
+        try:
+            endpoint = f"chits?id=eq.{chit_id}"
+            result = await self._make_request("DELETE", endpoint)
+            
+            # Supabase DELETE operations return empty responses on success
+            # The fact that we got here without an exception means it succeeded
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting chit: {e}")
+            return False
+
 def get_db() -> DatabaseManager:
     """Get the singleton database instance with connection pooling"""
     return DatabaseManager()

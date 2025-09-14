@@ -30,11 +30,13 @@ async def get_payments(
         vehicles = await db.get_vehicles()
         loans = await db.get_loans()
         outside_interests = await db.get_outside_interest()
+        chits = await db.get_chits()
         
         # Create lookup dictionaries
         vehicle_lookup = {v["id"]: v for v in vehicles}
         loan_lookup = {l["id"]: l for l in loans}
         outside_interest_lookup = {oi["id"]: oi for oi in outside_interests}
+        chit_lookup = {c["id"]: c for c in chits}
         
         # Enhance payments with related information and filter out invalid ones
         enhanced_payments = []
@@ -66,6 +68,22 @@ async def get_payments(
                     enhanced_payment["source_detail"] = f"Category: {outside_interest['category']}"
                     valid_payment = True
                 # Skip payments with invalid outside_interest IDs
+            
+            elif payment["source_type"] == "chit" and payment.get("source_id"):
+                chit = chit_lookup.get(payment["source_id"])
+                if chit:
+                    enhanced_payment["source_name"] = chit["chit_name"]
+                    enhanced_payment["source_detail"] = f"To: {chit['to_whom']}"
+                    # Add profit calculations for chit payments
+                    expected_amount = chit["monthly_amount"]
+                    actual_amount = payment["amount"]
+                    profit = expected_amount - actual_amount
+                    profit_percentage = (profit / expected_amount) * 100 if expected_amount > 0 else 0
+                    enhanced_payment["expected_amount"] = expected_amount
+                    enhanced_payment["profit"] = profit
+                    enhanced_payment["profit_percentage"] = profit_percentage
+                    valid_payment = True
+                # Skip payments with invalid chit IDs
             
             else:
                 # For other source types or payments without source_id, include them
@@ -114,8 +132,37 @@ async def get_payment(
         )
 
 @router.post("/", response_model=PaymentResponse)
-@router.post("/create", response_model=PaymentResponse)
 async def create_payment(
+    payment: PaymentCreate,
+    current_user: dict = Depends(get_current_user),
+    db: DatabaseManager = Depends(get_database)
+):
+    """Create a new payment record"""
+    try:
+        # Convert PaymentCreate to the format expected by the database
+        payment_data = {
+            "source_type": payment.source_type,
+            "source_id": payment.source_id,
+            "amount": payment.amount,
+            "payment_date": payment.payment_date.isoformat() if hasattr(payment.payment_date, 'isoformat') else str(payment.payment_date),
+            "payment_type": payment.payment_type,
+            "payment_status": payment.payment_status,
+            "description": payment.description
+        }
+        
+        # Create the payment
+        created_payment = await db.create_payment(payment_data)
+        return created_payment
+        
+    except Exception as e:
+        logger.error(f"Error creating payment: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error creating payment"
+        )
+
+@router.post("/vehicle", response_model=PaymentResponse)
+async def create_vehicle_payment(
     payment: VehiclePaymentCreate,
     current_user: dict = Depends(get_current_user),
     db: DatabaseManager = Depends(get_database)
