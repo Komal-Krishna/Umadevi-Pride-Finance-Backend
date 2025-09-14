@@ -36,10 +36,11 @@ async def get_payments(
         loan_lookup = {l["id"]: l for l in loans}
         outside_interest_lookup = {oi["id"]: oi for oi in outside_interests}
         
-        # Enhance payments with related information
+        # Enhance payments with related information and filter out invalid ones
         enhanced_payments = []
         for payment in payments:
             enhanced_payment = payment.copy()
+            valid_payment = False
             
             # Add source information based on source_type and source_id
             if payment["source_type"] == "vehicle" and payment.get("source_id"):
@@ -47,33 +48,34 @@ async def get_payments(
                 if vehicle:
                     enhanced_payment["source_name"] = vehicle["vehicle_name"]
                     enhanced_payment["source_detail"] = f"Lent to: {vehicle['lend_to']}"
-                else:
-                    enhanced_payment["source_name"] = f"Vehicle #{payment['source_id']}"
-                    enhanced_payment["source_detail"] = "Vehicle not found"
+                    valid_payment = True
+                # Skip payments with invalid vehicle IDs
             
             elif payment["source_type"] == "loan" and payment.get("source_id"):
                 loan = loan_lookup.get(payment["source_id"])
                 if loan:
                     enhanced_payment["source_name"] = loan["lender_name"]
                     enhanced_payment["source_detail"] = f"Type: {loan['lender_type']}"
-                else:
-                    enhanced_payment["source_name"] = f"Loan #{payment['source_id']}"
-                    enhanced_payment["source_detail"] = "Loan not found"
+                    valid_payment = True
+                # Skip payments with invalid loan IDs
             
             elif payment["source_type"] == "outside_interest" and payment.get("source_id"):
                 outside_interest = outside_interest_lookup.get(payment["source_id"])
                 if outside_interest:
                     enhanced_payment["source_name"] = outside_interest["to_whom"]
                     enhanced_payment["source_detail"] = f"Category: {outside_interest['category']}"
-                else:
-                    enhanced_payment["source_name"] = f"Outside Interest #{payment['source_id']}"
-                    enhanced_payment["source_detail"] = "Outside Interest not found"
+                    valid_payment = True
+                # Skip payments with invalid outside_interest IDs
             
             else:
+                # For other source types or payments without source_id, include them
                 enhanced_payment["source_name"] = payment["source_type"].title()
                 enhanced_payment["source_detail"] = "Other"
+                valid_payment = True
             
-            enhanced_payments.append(enhanced_payment)
+            # Only add valid payments to the result
+            if valid_payment:
+                enhanced_payments.append(enhanced_payment)
         
         return enhanced_payments
     except Exception as e:
