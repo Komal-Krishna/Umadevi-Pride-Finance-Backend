@@ -79,9 +79,15 @@ async def create_loan(
 ):
     """Create a new loan record"""
     try:
+        print("🔍 BACKEND: Received loan data:", loan)
+        print("🔍 BACKEND: Loan type:", type(loan))
+        print("🔍 BACKEND: Loan dict:", loan.dict())
+        
         loan_data = loan.dict()
         loan_data["is_closed"] = False
         loan_data["created_at"] = datetime.utcnow()
+        
+        print("🔍 BACKEND: Final loan_data:", loan_data)
         
         created_loan = await db.create_loan(loan_data)
         
@@ -95,6 +101,8 @@ async def create_loan(
     except HTTPException:
         raise
     except Exception as e:
+        print("🔍 BACKEND: Error creating loan:", e)
+        print("🔍 BACKEND: Error type:", type(e))
         logger.error(f"Error creating loan: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

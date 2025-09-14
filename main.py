@@ -15,12 +15,16 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     """Manage application lifespan with proper connection handling"""
     # Startup
+    logger.info("Starting up Uma Devi's Pride Finance API")
     db = get_db()  # Initialize singleton
+    logger.info("Database connection pool initialized")
     
     yield
     
     # Shutdown
+    logger.info("Shutting down Uma Devi's Pride Finance API")
     await db.close()
+    logger.info("Database connection pool closed")
 
 app = FastAPI(title="Uma Devi's Pride Finance API", version="1.0.0", lifespan=lifespan)
 
